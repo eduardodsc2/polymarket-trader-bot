@@ -49,27 +49,26 @@ class GammaFetcher:
     def get_resolved_markets(self, start_date: str, end_date: str) -> list[Market]:
         """Fetch all resolved markets with end_date between start_date and end_date.
 
+        Uses server-side date filtering (end_date_min / end_date_max) to avoid
+        downloading the entire history.
+
         Args:
             start_date: ISO date string, e.g. '2024-01-01'
             end_date:   ISO date string, e.g. '2024-12-31'
         """
         logger.info("Fetching resolved markets between {} and {}", start_date, end_date)
-        start_dt = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
-        end_dt = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc)
-
-        markets = self._fetch_all_pages(closed=True)
-        filtered = [
-            m for m in markets
-            if m.resolved
-            and m.end_date is not None
-            and start_dt <= m.end_date <= end_dt
-        ]
-        logger.info("Resolved markets in range: {}", len(filtered))
-        return filtered
+        extra = {"end_date_min": start_date, "end_date_max": end_date}
+        markets = self._fetch_all_pages(closed=True, extra_params=extra)
+        logger.info("Resolved markets in range: {}", len(markets))
+        return markets
 
     # ── Internal helpers ───────────────────────────────────────────────────────
 
-    def _fetch_all_pages(self, closed: bool) -> list[Market]:
+    def _fetch_all_pages(
+        self,
+        closed: bool,
+        extra_params: dict[str, Any] | None = None,
+    ) -> list[Market]:
         """Paginate through the /markets endpoint using offset+limit."""
         markets: list[Market] = []
         offset = 0
@@ -80,6 +79,8 @@ class GammaFetcher:
                 "closed": str(closed).lower(),
                 "offset": offset,
             }
+            if extra_params:
+                params.update(extra_params)
 
             batch_raw = self._get("/markets", params=params)
             # API returns a list directly
