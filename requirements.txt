@@ -1,6 +1,6 @@
 # ── Polymarket ────────────────────────────────────────────────────────────────
 py-clob-client>=0.18.0
-polymarket-apis>=0.1.0
+# polymarket-apis: package not available on PyPI — replaced by direct httpx calls to Gamma/CLOB APIs
 
 # ── Data & numerics ──────────────────────────────────────────────────────────
 pandas>=2.2.0
