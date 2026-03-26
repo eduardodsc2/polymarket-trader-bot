@@ -1,0 +1,43 @@
+{
+  "domain": {
+    "chainId": 137,
+    "name": "Polymarket Contract Proxy Factory",
+    "verifyingContract": "0xaacfeea03eb1561c4e67d661e40682bd20e3541b"
+  },
+  "message": {
+    "paymentToken": "0x0000000000000000000000000000000000000000",
+    "payment": "0",
+    "paymentReceiver": "0x0000000000000000000000000000000000000000"
+  },
+  "primaryType": "CreateProxy",
+  "types": {
+    "EIP712Domain": [
+      {
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "name": "chainId",
+        "type": "uint256"
+      },
+      {
+        "name": "verifyingContract",
+        "type": "address"
+      }
+    ],
+    "CreateProxy": [
+      {
+        "name": "paymentToken",
+        "type": "address"
+      },
+      {
+        "name": "payment",
+        "type": "uint256"
+      },
+      {
+        "name": "paymentReceiver",
+        "type": "address"
+      }
+    ]
+  }
+}
