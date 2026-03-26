@@ -149,6 +149,47 @@ class PortfolioState(BaseModel):
     timestamp: Optional[datetime] = None
 
 
+# ── Order lifecycle ───────────────────────────────────────────────────────────
+
+class OrderRequest(BaseModel):
+    """Concrete order emitted by a strategy and processed by the fill model."""
+    order_id: str
+    strategy: str
+    condition_id: str
+    token_id: str
+    side: Literal["BUY", "SELL"]
+    size_usd: float = Field(..., gt=0)
+    limit_price: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    timestamp: datetime
+
+
+class OrderFill(BaseModel):
+    """Result returned by the fill model after processing an OrderRequest."""
+    order_id: str
+    token_id: str
+    side: Literal["BUY", "SELL"]
+    requested_size_usd: float
+    filled_size_usd: float
+    fill_price: float = Field(..., ge=0.0, le=1.0)
+    slippage_bps: float = 0.0
+    fee_usd: float = 0.0
+    timestamp: datetime
+    partial: bool = False
+
+
+# ── Portfolio snapshot ─────────────────────────────────────────────────────────
+
+class PortfolioSnapshot(BaseModel):
+    """Point-in-time portfolio capture — used to build the equity curve."""
+    timestamp: datetime
+    cash_usd: float
+    positions_value_usd: float
+    total_value_usd: float
+    unrealized_pnl: float
+    realized_pnl: float
+    open_positions: int
+
+
 # ── Backtest metrics ──────────────────────────────────────────────────────────
 
 class BacktestMetrics(BaseModel):
