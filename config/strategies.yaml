@@ -1,0 +1,30 @@
+# Per-strategy parameters
+# Loaded at runtime by config/settings.py and each strategy module.
+
+sum_to_one_arb:
+  enabled: true
+  min_arb_gap: 0.02          # Minimum YES+NO discount to enter (e.g. 0.02 = 2¢)
+  max_position_usd: 200.0
+  kelly_fraction: 0.25
+
+market_maker:
+  enabled: false
+  spread_target: 0.02        # Target bid-ask spread to capture
+  max_inventory_usd: 100.0
+  rebalance_interval_sec: 60
+  kelly_fraction: 0.10
+
+value_betting:
+  enabled: false
+  min_edge: 0.05             # Only enter if |LLM_prob - market_price| > 5%
+  min_confidence: 0.70       # LLM confidence threshold
+  max_position_usd: 50.0
+  kelly_fraction: 0.15
+  llm_model: claude-sonnet-4-6
+
+momentum:
+  enabled: false
+  lookback_hours: 24
+  entry_threshold: 0.03      # Min price change over lookback to enter
+  max_position_usd: 75.0
+  kelly_fraction: 0.20

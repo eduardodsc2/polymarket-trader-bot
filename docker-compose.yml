@@ -1,0 +1,95 @@
+version: "3.9"
+
+services:
+
+  bot:
+    build:
+      context: .
+      target: bot
+    env_file: .env
+    volumes:
+      - ./data:/app/data          # Raw + processed data persists on host
+      - ./results:/app/results    # Backtest outputs persist on host
+      - .:/app                    # Source code live-mounted for development
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - polymarket
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: polymarket
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: polymarket_bot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polymarket"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"               # Expose to WSL host for DB inspection tools
+    networks:
+      - polymarket
+
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    env_file: .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - polymarket
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  jupyter:
+    build:
+      context: .
+      target: jupyter
+    env_file: .env
+    volumes:
+      - .:/app                    # Full repo mounted so notebooks see all code
+    ports:
+      - "8888:8888"
+    depends_on:
+      - db
+    networks:
+      - polymarket
+    profiles:
+      - research                  # Only starts with: docker compose --profile research up
+
+  scheduler:
+    build:
+      context: .
+      target: scheduler
+    env_file: .env
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - polymarket
+    profiles:
+      - live                      # Only starts with: docker compose --profile live up
+
+volumes:
+  pgdata:
+
+networks:
+  polymarket:
+    driver: bridge

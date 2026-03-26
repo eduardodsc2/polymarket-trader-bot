@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  bot:
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      # No source code live-mount in prod — use built image
+    restart: unless-stopped
+
+  db:
+    ports: []                    # Don't expose DB port externally in prod
+    restart: unless-stopped
+
+  dashboard:
+    restart: unless-stopped
+
+  scheduler:
+    restart: unless-stopped
+    profiles: []                 # Enable scheduler in prod (no profile gate)
