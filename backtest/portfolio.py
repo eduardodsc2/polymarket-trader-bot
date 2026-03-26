@@ -191,6 +191,54 @@ class Portfolio:
                 loss,
             )
 
+    # ── Per-token resolution (used by engine for correct multi-leg settlements) ──
+
+    def resolve_token(self, token_id: str, timestamp: datetime) -> None:
+        """
+        Settle a specific token at $1 per token (winning side).
+
+        Called by the engine instead of resolve_position() so that in multi-leg
+        strategies (e.g. SumToOneArb) only the winning token receives a payout
+        and the losing token is separately expired.
+        """
+        pos = self._positions.pop(token_id, None)
+        if pos is None:
+            return
+        gross_payout = pos.tokens * 1.0
+        fee = gross_payout * self.FEE_PCT
+        net_payout = gross_payout - fee
+        cost_basis = pos.tokens * pos.avg_entry_price
+        pnl = net_payout - cost_basis
+        self.cash_usd += net_payout
+        self.realized_pnl += pnl
+        logger.info(
+            "Resolved token {} tokens={:.4f} payout={:.4f} fee={:.4f} pnl={:.4f}",
+            token_id[:12],
+            pos.tokens,
+            net_payout,
+            fee,
+            pnl,
+        )
+
+    def expire_token(self, token_id: str) -> None:
+        """
+        Write off a specific token at $0 (losing side).
+
+        Called by the engine to expire only the losing token when both YES and NO
+        positions exist in the same condition (multi-leg strategies).
+        """
+        pos = self._positions.pop(token_id, None)
+        if pos is None:
+            return
+        loss = pos.tokens * pos.avg_entry_price
+        self.realized_pnl -= loss
+        logger.info(
+            "Expired token {} tokens={:.4f} loss={:.4f}",
+            token_id[:12],
+            pos.tokens,
+            loss,
+        )
+
     # ── Mark-to-market ─────────────────────────────────────────────────────────
 
     def mark_to_market(self, price_updates: dict[str, float], timestamp: datetime) -> None:

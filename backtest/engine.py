@@ -255,12 +255,13 @@ class BacktestEngine:
 
                 self._strategy.on_market_resolution(event)
 
+                # Resolve per-token so multi-leg strategies (e.g. SumToOneArb
+                # holding both YES and NO) are settled correctly: winning token
+                # receives $1 payout; losing token is written off at $0.
                 if winning_token:
-                    portfolio.resolve_position(
-                        event.condition_id, outcome, event.timestamp
-                    )
+                    portfolio.resolve_token(winning_token, event.timestamp)
                 if losing_token:
-                    portfolio.expire_position(event.condition_id)
+                    portfolio.expire_token(losing_token)
 
                 portfolio.mark_to_market({}, event.timestamp)
 
