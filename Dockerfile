@@ -2,6 +2,7 @@
 FROM python:3.11-slim AS base
 
 WORKDIR /app
+ENV PYTHONPATH=/app
 
 # System dependencies for scientific Python + Polygon crypto libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
