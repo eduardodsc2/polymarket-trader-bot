@@ -31,6 +31,7 @@ Research questions:
 from __future__ import annotations
 
 import uuid
+from datetime import timezone
 
 from backtest.events import MarketResolutionEvent, PriceUpdateEvent
 from config.schemas import Market, OrderRequest, PortfolioSnapshot
@@ -118,7 +119,8 @@ class CalibrationBetting(BaseStrategy):
 
         # Check days-to-resolution filter
         if market.end_date is not None:
-            remaining = (market.end_date - event.timestamp).total_seconds() / 86_400
+            end_dt = market.end_date if market.end_date.tzinfo else market.end_date.replace(tzinfo=timezone.utc)
+            remaining = (end_dt - event.timestamp).total_seconds() / 86_400
             if remaining > self.max_days_to_resolution:
                 return []  # market resolves too far in the future
 

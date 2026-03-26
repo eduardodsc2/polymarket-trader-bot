@@ -46,21 +46,62 @@ class GammaFetcher:
         logger.info("Active markets fetched: {} total, {} above min_volume", len(markets), len(filtered))
         return filtered
 
-    def get_resolved_markets(self, start_date: str, end_date: str) -> list[Market]:
-        """Fetch all resolved markets with end_date between start_date and end_date.
+    def get_resolved_markets(
+        self,
+        start_date: str,
+        end_date: str,
+        min_volume: float = 0.0,
+        max_markets: int = 2_000,
+    ) -> list[Market]:
+        """Fetch resolved markets with end_date between start_date and end_date.
 
-        Uses server-side date filtering (end_date_min / end_date_max) to avoid
-        downloading the entire history.
+        Uses server-side date and volume filters (end_date_min, end_date_max,
+        volume_num_min) to avoid fetching the entire 650k+ market history.
+        A client-side pass is still applied as a safety net.
 
         Args:
-            start_date: ISO date string, e.g. '2024-01-01'
-            end_date:   ISO date string, e.g. '2024-12-31'
+            start_date:  ISO date string, e.g. '2024-01-01'
+            end_date:    ISO date string, e.g. '2024-12-31'
+            min_volume:  Only return markets above this USDC volume (default 0).
+            max_markets: Pagination cap — stop after fetching this many raw records
+                         to avoid runaway pagination (default 2 000).
         """
-        logger.info("Fetching resolved markets between {} and {}", start_date, end_date)
-        extra = {"end_date_min": start_date, "end_date_max": end_date}
-        markets = self._fetch_all_pages(closed=True, extra_params=extra)
-        logger.info("Resolved markets in range: {}", len(markets))
-        return markets
+        logger.info(
+            "Fetching resolved markets between {} and {} (min_volume={}, cap={})",
+            start_date, end_date, min_volume, max_markets,
+        )
+
+        # Build server-side filter params (Gamma API date-time format).
+        # negRisk=false excludes multi-outcome group sub-markets whose CLOB
+        # token IDs are not supported by the prices-history endpoint.
+        extra: dict[str, Any] = {
+            "end_date_min": f"{start_date}T00:00:00Z",
+            "end_date_max": f"{end_date}T23:59:59Z",
+            "negRisk": "false",
+        }
+        if min_volume > 0:
+            extra["volume_num_min"] = min_volume
+
+        markets = self._fetch_all_pages(closed=True, extra_params=extra, max_markets=max_markets)
+
+        # Client-side safety net — normalise datetimes to UTC.
+        start = datetime.fromisoformat(start_date).replace(tzinfo=timezone.utc)
+        end_dt = datetime.fromisoformat(end_date).replace(tzinfo=timezone.utc)
+
+        def _utc(dt: datetime) -> datetime:
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+        filtered = [
+            m for m in markets
+            if m.end_date is not None
+            and start <= _utc(m.end_date) <= end_dt
+            and (m.volume_usd or 0.0) >= min_volume
+        ]
+        logger.info(
+            "Resolved markets after filter: {} / {} raw records",
+            len(filtered), len(markets),
+        )
+        return filtered
 
     # ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -68,8 +109,17 @@ class GammaFetcher:
         self,
         closed: bool,
         extra_params: dict[str, Any] | None = None,
+        max_markets: int = 100_000,
     ) -> list[Market]:
-        """Paginate through the /markets endpoint using offset+limit."""
+        """Paginate through the /markets endpoint using offset+limit.
+
+        Args:
+            closed:      True for resolved markets, False for active.
+            extra_params: Additional query parameters merged into each request.
+            max_markets: Hard stop — return early once this many raw records
+                         have been collected.  Prevents runaway pagination on
+                         large result sets (the Gamma API has 650 k+ records).
+        """
         markets: list[Market] = []
         offset = 0
 
@@ -83,7 +133,6 @@ class GammaFetcher:
                 params.update(extra_params)
 
             batch_raw = self._get("/markets", params=params)
-            # API returns a list directly
             if not isinstance(batch_raw, list):
                 break
             if not batch_raw:
@@ -95,8 +144,11 @@ class GammaFetcher:
 
             logger.debug("Fetched {} markets so far (offset={})", len(markets), offset)
 
-            # If we got fewer items than the page size, we've reached the end
             if len(batch_raw) < self._PAGE_SIZE:
+                break
+
+            if len(markets) >= max_markets:
+                logger.info("Reached max_markets cap ({}) — stopping pagination.", max_markets)
                 break
 
         return markets
@@ -196,6 +248,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--resolved", action="store_true", help="Fetch resolved markets")
     parser.add_argument("--start", default="2024-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2024-12-31", help="End date (YYYY-MM-DD)")
+    parser.add_argument("--max-markets", type=int, default=2_000, help="Pagination cap for resolved fetch")
     parser.add_argument("--save", action="store_true", help="Persist to PostgreSQL")
     return parser.parse_args()
 
@@ -214,7 +267,11 @@ if __name__ == "__main__":
     fetcher = GammaFetcher()
 
     if args.resolved:
-        result = fetcher.get_resolved_markets(args.start, args.end)
+        result = fetcher.get_resolved_markets(
+            args.start, args.end,
+            min_volume=args.min_volume,
+            max_markets=args.max_markets,
+        )
     else:
         result = fetcher.get_active_markets(min_volume=args.min_volume)
 

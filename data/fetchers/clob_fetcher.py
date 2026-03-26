@@ -57,14 +57,19 @@ class CLOBFetcher:
     ) -> list[PricePoint]:
         """Fetch OHLC price history for a token.
 
+        The CLOB API rejects startTs/endTs ranges longer than ~1 month, so this
+        method fetches the full history with ``interval=all`` and then filters
+        client-side to [start_ts, end_ts].
+
         Args:
             token_id:  Polymarket YES or NO token ID.
-            start_ts:  Unix timestamp (seconds) for range start.
-            end_ts:    Unix timestamp (seconds) for range end.
+            start_ts:  Unix timestamp (seconds) — used for client-side filtering.
+            end_ts:    Unix timestamp (seconds) — used for client-side filtering.
             fidelity:  Candle resolution in minutes (1, 60, 360, 1440).
 
         Returns:
-            List of PricePoint ordered by timestamp ascending.
+            List of PricePoint ordered by timestamp ascending, filtered to the
+            requested date range.
         """
         logger.info(
             "Fetching price history token={} fidelity={}min start={} end={}",
@@ -74,11 +79,12 @@ class CLOBFetcher:
             datetime.fromtimestamp(end_ts, tz=timezone.utc).date(),
         )
 
-        # CLOB API uses 'market' (not 'token_id') as the asset identifier
+        # CLOB API uses 'market' (not 'token_id') as the asset identifier.
+        # interval=all fetches the complete history; startTs/endTs max-range
+        # restrictions are bypassed.
         params = {
             "market": token_id,
-            "startTs": start_ts,
-            "endTs": end_ts,
+            "interval": "all",
             "fidelity": fidelity,
         }
 
@@ -94,8 +100,17 @@ class CLOBFetcher:
             raise
 
         history = data.get("history", [])
-        points = [_parse_price_point(token_id, row) for row in history]
-        logger.info("Price history fetched: {} points for token {}", len(points), token_id[:16] + "…")
+        all_points = [_parse_price_point(token_id, row) for row in history]
+
+        # Client-side filter to the requested window
+        points = [
+            p for p in all_points
+            if start_ts <= int(p.timestamp.timestamp()) <= end_ts
+        ]
+        logger.info(
+            "Price history fetched: {} points ({} in range) for token {}",
+            len(all_points), len(points), token_id[:16] + "…",
+        )
         return points
 
     def get_orderbook(self, token_id: str, top_n: int = 5) -> OrderbookSnapshot:
