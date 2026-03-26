@@ -123,9 +123,23 @@ class GammaFetcher:
           volume, liquidity, category
         """
         # Token IDs: clobTokenIds[0] = YES, clobTokenIds[1] = NO
-        # (matches outcomes[0] = "Yes", outcomes[1] = "No")
-        clob_ids: list[str] = raw.get("clobTokenIds") or []
-        outcomes: list[str] = raw.get("outcomes") or []
+        # clobTokenIds may arrive as a JSON string or already parsed list
+        import json as _json
+        raw_ids = raw.get("clobTokenIds") or []
+        if isinstance(raw_ids, str):
+            try:
+                raw_ids = _json.loads(raw_ids)
+            except (ValueError, TypeError):
+                raw_ids = []
+        clob_ids: list[str] = raw_ids
+
+        raw_outcomes = raw.get("outcomes") or []
+        if isinstance(raw_outcomes, str):
+            try:
+                raw_outcomes = _json.loads(raw_outcomes)
+            except (ValueError, TypeError):
+                raw_outcomes = []
+        outcomes: list[str] = raw_outcomes
         yes_token_id: str | None = None
         no_token_id: str | None = None
         for idx, outcome in enumerate(outcomes):
