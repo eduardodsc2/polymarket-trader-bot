@@ -34,13 +34,17 @@ class TestCheckPriceRange:
         assert check_price_range(prices) == []
 
     def test_price_above_one_flagged(self) -> None:
-        prices = [_pt("tok", 0.5), _pt("tok", 1.5)]
-        anomalies = check_price_range(prices)
-        # 1.5 would fail PricePoint validator — test on raw object instead
-        # (PricePoint clamps to 1.0 via validator)
-        # So this check is a no-op for valid Pydantic models,
-        # but we test the function signature is correct.
-        assert isinstance(anomalies, list)
+        # PricePoint enforces [0,1] via Pydantic — check_price_range is a
+        # secondary safeguard for data loaded directly from DB (bypassing validation).
+        # Build a mock that quacks like PricePoint but has an invalid price.
+        from unittest.mock import MagicMock
+        bad = MagicMock(spec=["token_id", "timestamp", "price"])
+        bad.token_id = "tok"
+        bad.timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        bad.price = 1.5
+        anomalies = check_price_range([bad])
+        assert len(anomalies) == 1
+        assert "1.5" in anomalies[0].issue
 
     def test_empty_list(self) -> None:
         assert check_price_range([]) == []
