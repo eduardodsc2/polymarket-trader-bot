@@ -74,8 +74,9 @@ class CLOBFetcher:
             datetime.fromtimestamp(end_ts, tz=timezone.utc).date(),
         )
 
+        # CLOB API uses 'market' (not 'token_id') as the asset identifier
         params = {
-            "token_id": token_id,
+            "market": token_id,
             "startTs": start_ts,
             "endTs": end_ts,
             "fidelity": fidelity,
