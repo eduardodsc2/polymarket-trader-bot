@@ -70,32 +70,38 @@ class GammaFetcher:
     # ── Internal helpers ───────────────────────────────────────────────────────
 
     def _fetch_all_pages(self, closed: bool) -> list[Market]:
-        """Paginate through the /markets endpoint and collect all markets."""
+        """Paginate through the /markets endpoint using offset+limit."""
         markets: list[Market] = []
-        cursor: str | None = None
+        offset = 0
 
         while True:
             params: dict[str, Any] = {
                 "limit": self._PAGE_SIZE,
                 "closed": str(closed).lower(),
+                "offset": offset,
             }
-            if cursor:
-                params["next_cursor"] = cursor
 
-            raw = self._get("/markets", params=params)
-            batch = [self._parse_market(m) for m in raw.get("data", [])]
-            markets.extend(batch)
-
-            cursor = raw.get("next_cursor")
-            if not cursor or cursor == "LTE=":
+            batch_raw = self._get("/markets", params=params)
+            # API returns a list directly
+            if not isinstance(batch_raw, list):
+                break
+            if not batch_raw:
                 break
 
-            logger.debug("Fetched {} markets, cursor={}", len(markets), cursor)
+            batch = [self._parse_market(m) for m in batch_raw]
+            markets.extend(batch)
+            offset += len(batch_raw)
+
+            logger.debug("Fetched {} markets so far (offset={})", len(markets), offset)
+
+            # If we got fewer items than the page size, we've reached the end
+            if len(batch_raw) < self._PAGE_SIZE:
+                break
 
         return markets
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Make a GET request; raise on HTTP errors."""
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> list | dict:
+        """Make a GET request; raise on HTTP errors. Returns list or dict."""
         try:
             response = self._client.get(path, params=params)
             response.raise_for_status()
@@ -109,32 +115,45 @@ class GammaFetcher:
 
     @staticmethod
     def _parse_market(raw: dict[str, Any]) -> Market:
-        """Map a raw Gamma API market dict to a Market Pydantic model."""
-        # Extract YES/NO token IDs from the tokens array
+        """Map a raw Gamma API market dict to a Market Pydantic model.
+
+        Actual field names from the Gamma API (camelCase):
+          conditionId, endDateIso, clobTokenIds, outcomes, closed, active,
+          volume, liquidity, category
+        """
+        # Token IDs: clobTokenIds[0] = YES, clobTokenIds[1] = NO
+        # (matches outcomes[0] = "Yes", outcomes[1] = "No")
+        clob_ids: list[str] = raw.get("clobTokenIds") or []
+        outcomes: list[str] = raw.get("outcomes") or []
         yes_token_id: str | None = None
         no_token_id: str | None = None
-        for token in raw.get("tokens", []):
-            outcome = (token.get("outcome") or "").upper()
-            if outcome == "YES":
-                yes_token_id = token.get("token_id")
-            elif outcome == "NO":
-                no_token_id = token.get("token_id")
+        for idx, outcome in enumerate(outcomes):
+            if idx < len(clob_ids):
+                if outcome.upper() == "YES":
+                    yes_token_id = clob_ids[idx]
+                elif outcome.upper() == "NO":
+                    no_token_id = clob_ids[idx]
+        # Fallback: if outcomes are ["Yes","No"] positionally
+        if yes_token_id is None and len(clob_ids) >= 1:
+            yes_token_id = clob_ids[0]
+        if no_token_id is None and len(clob_ids) >= 2:
+            no_token_id = clob_ids[1]
 
-        # Parse end_date (API returns ISO string or None)
+        # Parse end_date
         end_date: datetime | None = None
-        raw_end = raw.get("end_date_iso") or raw.get("endDateIso") or raw.get("end_date")
+        raw_end = raw.get("endDateIso") or raw.get("endDate") or raw.get("end_date_iso")
         if raw_end:
             try:
-                end_date = datetime.fromisoformat(raw_end.replace("Z", "+00:00"))
+                end_date = datetime.fromisoformat(str(raw_end).replace("Z", "+00:00"))
             except (ValueError, AttributeError):
                 pass
 
         return Market(
-            condition_id=raw["condition_id"],
+            condition_id=raw.get("conditionId") or raw.get("condition_id", ""),
             question=raw.get("question", ""),
-            category=raw.get("category") or raw.get("tag"),
+            category=raw.get("category"),
             end_date=end_date,
-            resolved=bool(raw.get("closed", False) and raw.get("resolution_source")),
+            resolved=bool(raw.get("closed", False)),
             outcome=raw.get("outcome"),
             volume_usd=_to_float(raw.get("volume")),
             liquidity_usd=_to_float(raw.get("liquidity")),

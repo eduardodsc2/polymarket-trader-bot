@@ -32,20 +32,18 @@ class TestToFloat:
 
 class TestGammaFetcherParseMarket:
     def test_full_market(self) -> None:
+        # Uses actual Gamma API field names (camelCase)
         raw = {
-            "condition_id": "cond_abc",
+            "conditionId": "cond_abc",
             "question": "Will BTC reach $100k?",
             "category": "crypto",
-            "end_date_iso": "2024-12-31T00:00:00Z",
+            "endDateIso": "2024-12-31T00:00:00Z",
             "closed": True,
-            "resolution_source": "coinbase",
             "outcome": "YES",
             "volume": "50000.0",
             "liquidity": "12000.5",
-            "tokens": [
-                {"token_id": "yes_tok", "outcome": "Yes"},
-                {"token_id": "no_tok", "outcome": "No"},
-            ],
+            "outcomes": ["Yes", "No"],
+            "clobTokenIds": ["yes_tok", "no_tok"],
         }
         market = GammaFetcher._parse_market(raw)
 
@@ -61,7 +59,7 @@ class TestGammaFetcherParseMarket:
         assert market.no_token_id == "no_tok"
 
     def test_minimal_market(self) -> None:
-        raw = {"condition_id": "cond_min", "question": "Simple question?"}
+        raw = {"conditionId": "cond_min", "question": "Simple question?"}
         market = GammaFetcher._parse_market(raw)
 
         assert market.condition_id == "cond_min"
@@ -70,32 +68,30 @@ class TestGammaFetcherParseMarket:
         assert market.resolved is False
 
     def test_missing_tokens(self) -> None:
-        raw = {"condition_id": "cond_notok", "question": "No tokens?"}
+        raw = {"conditionId": "cond_notok", "question": "No tokens?"}
         market = GammaFetcher._parse_market(raw)
         assert market.yes_token_id is None
         assert market.no_token_id is None
 
     def test_bad_end_date_does_not_raise(self) -> None:
-        raw = {"condition_id": "cond_bad", "question": "Bad date?", "end_date_iso": "not-a-date"}
+        raw = {"conditionId": "cond_bad", "question": "Bad date?", "endDateIso": "not-a-date"}
         market = GammaFetcher._parse_market(raw)
         assert market.end_date is None
 
 
 class TestGammaFetcherGetActiveMarkets:
     def test_filters_by_min_volume(self) -> None:
-        page1 = {
-            "data": [
-                {"condition_id": "c1", "question": "Q1", "volume": "50000"},
-                {"condition_id": "c2", "question": "Q2", "volume": "5000"},
-                {"condition_id": "c3", "question": "Q3", "volume": "25000"},
-            ],
-            "next_cursor": None,
-        }
+        # API returns a flat list (no wrapper dict)
+        page = [
+            {"conditionId": "c1", "question": "Q1", "volume": "50000", "closed": False},
+            {"conditionId": "c2", "question": "Q2", "volume": "5000", "closed": False},
+            {"conditionId": "c3", "question": "Q3", "volume": "25000", "closed": False},
+        ]
 
         mock_client = MagicMock()
         mock_client.get.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(return_value=page1),
+            json=MagicMock(return_value=page),
             raise_for_status=MagicMock(),
         )
 
@@ -105,22 +101,21 @@ class TestGammaFetcherGetActiveMarkets:
         assert len(markets) == 2
         assert {m.condition_id for m in markets} == {"c1", "c3"}
 
-    def test_pagination(self) -> None:
-        pages = [
-            {"data": [{"condition_id": "c1", "question": "Q1", "volume": "20000"}], "next_cursor": "page2"},
-            {"data": [{"condition_id": "c2", "question": "Q2", "volume": "30000"}], "next_cursor": None},
-        ]
+    def test_pagination_stops_on_short_page(self) -> None:
+        # First page is full (PAGE_SIZE=100); second page is shorter → stop
+        page1 = [{"conditionId": f"c{i}", "question": f"Q{i}", "volume": "20000"} for i in range(100)]
+        page2 = [{"conditionId": "c100", "question": "Q100", "volume": "30000"}]
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.json = MagicMock(side_effect=pages)
+        mock_resp.json = MagicMock(side_effect=[page1, page2])
         mock_client = MagicMock()
         mock_client.get.return_value = mock_resp
 
         fetcher = GammaFetcher(http_client=mock_client)
         markets = fetcher.get_active_markets(min_volume=0)
 
-        assert len(markets) == 2
+        assert len(markets) == 101
 
 
 # ── CLOBFetcher unit tests ─────────────────────────────────────────────────────
