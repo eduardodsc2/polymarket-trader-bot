@@ -102,6 +102,18 @@ class NewsArticle(BaseModel):
     url: Optional[str] = None
     published_at: datetime
     fetched_at: Optional[datetime] = None
+    relevance_score: float = 0.0
+
+
+class SentimentReading(BaseModel):
+    """Social sentiment data point — from LunarCrush or VADER."""
+    topic: str
+    source: Literal["lunarcrush", "vader"]
+    sentiment: float = Field(..., ge=-1.0, le=1.0)
+    posts_active: Optional[int] = None
+    interactions: Optional[int] = None
+    galaxy_score: Optional[float] = None
+    timestamp: datetime
 
 
 class NewsFeatures(BaseModel):

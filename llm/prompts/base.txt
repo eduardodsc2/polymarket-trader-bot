@@ -1,14 +1,22 @@
-You are an expert prediction market analyst. Given the following market question and recent news context, estimate the probability that the event described will resolve YES.
+You are a quantitative prediction market analyst. Estimate the probability that the following event resolves YES.
 
-Market question: {question}
-Current market price (YES): {market_price}
-News context:
+MARKET: {question}
+CATEGORY: {category}
+RESOLVES: {resolution_date}
+CURRENT MARKET PRICE (implied probability): {current_price:.2f}
+
+RECENT NEWS CONTEXT:
 {news_context}
 
-Respond in the following JSON format:
-{
-  "probability": <float between 0 and 1>,
-  "confidence": <float between 0 and 1>,
-  "reasoning": "<brief explanation>",
-  "key_sources": ["<source1>", "<source2>"]
-}
+INSTRUCTIONS:
+Think step by step:
+1. What is the base rate for this type of event historically?
+2. What do the news items above suggest about the current probability?
+3. Is the current market price consistent with the evidence, or does it appear mispriced?
+
+Output ONLY in this exact format (no extra text before or after):
+PROBABILITY: [0.00–1.00]
+CONFIDENCE: [LOW / MEDIUM / HIGH]
+EDGE: [estimated edge vs market price, e.g. +0.12 or -0.08]
+REASONING: [3–4 sentences explaining your estimate]
+SOURCES: [comma-separated list of source names used, or NONE]

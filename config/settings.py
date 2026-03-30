@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     reddit_client_secret: str = ""
     reddit_user_agent: str = "polymarket-bot/1.0"
 
+    # ── News pipeline (Phase 4) ───────────────────────────────────────────────
+    news_lookback_hours: int = 48
+    news_min_relevance_score: float = 0.35
+    news_max_articles_per_prompt: int = 5
+    use_semantic_relevance: bool = False
+
+    # ── LLM pipeline (Phase 4) ───────────────────────────────────────────────
+    llm_cache_ttl_hours: int = 6
+    llm_min_volume_usd: float = 50_000.0
+
     # ── Database ─────────────────────────────────────────────────────────────
     db_password: str = "changeme"
     database_url: str = "postgresql+asyncpg://polymarket:changeme@db:5432/polymarket_bot"
