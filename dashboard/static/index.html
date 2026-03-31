@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polymarket Trader Bot</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Polymarket Trader Bot</h1>
+    <div id="status-bar">
+      <span class="badge" id="badge-mode">paper</span>
+      <span class="badge" id="badge-strategy">—</span>
+      <span class="badge circuit closed" id="badge-circuit">CLOSED</span>
+      <span id="last-update">—</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ── Summary row ────────────────────────────────────────────────── -->
+    <section class="summary-row">
+      <div class="card">
+        <div class="card-label">Portfolio Value</div>
+        <div class="card-value" id="total-value">$—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Cash</div>
+        <div class="card-value" id="cash-value">$—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Realized PnL</div>
+        <div class="card-value" id="realized-pnl">$—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Open Positions</div>
+        <div class="card-value" id="open-positions">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Total Trades</div>
+        <div class="card-value" id="total-trades">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Win Rate</div>
+        <div class="card-value" id="win-rate">—</div>
+      </div>
+    </section>
+
+    <!-- ── Equity curve ────────────────────────────────────────────────── -->
+    <section class="chart-section">
+      <h2>Equity Curve</h2>
+      <canvas id="equity-chart" height="80"></canvas>
+    </section>
+
+    <!-- ── Alerts ─────────────────────────────────────────────────────── -->
+    <section id="alerts-section" class="hidden">
+      <h2>Risk Alerts</h2>
+      <ul id="alerts-list"></ul>
+    </section>
+
+    <!-- ── Recent Trades ──────────────────────────────────────────────── -->
+    <section>
+      <h2>Recent Trades</h2>
+      <table id="trades-table">
+        <thead>
+          <tr>
+            <th>Time</th><th>Token</th><th>Side</th>
+            <th>Size USD</th><th>Price</th><th>Slippage</th>
+          </tr>
+        </thead>
+        <tbody id="trades-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

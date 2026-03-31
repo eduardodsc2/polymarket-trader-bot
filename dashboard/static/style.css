@@ -1,0 +1,127 @@
+/* ── Reset & base ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --border:    #30363d;
+  --text:      #c9d1d9;
+  --muted:     #8b949e;
+  --accent:    #58a6ff;
+  --green:     #3fb950;
+  --red:       #f85149;
+  --yellow:    #d29922;
+  --font:      'SF Mono', 'Fira Code', monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ── Header ────────────────────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+  font-size: 1rem;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+#last-update { color: var(--muted); font-size: 0.8em; margin-left: auto; }
+
+/* ── Badges ────────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75em;
+  font-weight: 600;
+  background: var(--border);
+  color: var(--text);
+}
+
+.badge.circuit.closed  { background: var(--green); color: #000; }
+.badge.circuit.open    { background: var(--red);   color: #fff; }
+.badge.circuit.half_open { background: var(--yellow); color: #000; }
+
+/* ── Main layout ───────────────────────────────────────────────────────────── */
+main { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
+
+/* ── Summary cards ─────────────────────────────────────────────────────────── */
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.card-label { color: var(--muted); font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; }
+.card-value { font-size: 1.35em; font-weight: 700; color: var(--text); margin-top: 0.2rem; }
+.card-value.positive { color: var(--green); }
+.card-value.negative { color: var(--red); }
+
+/* ── Chart ─────────────────────────────────────────────────────────────────── */
+.chart-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+}
+.chart-section h2 { font-size: 0.85em; color: var(--muted); margin-bottom: 0.75rem; }
+
+/* ── Alerts ────────────────────────────────────────────────────────────────── */
+#alerts-section {
+  background: #1a0a0a;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+#alerts-section h2 { color: var(--red); font-size: 0.85em; margin-bottom: 0.5rem; }
+#alerts-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+#alerts-list li { color: var(--red); font-size: 0.85em; }
+#alerts-list li::before { content: "⚠ "; }
+.hidden { display: none !important; }
+
+/* ── Table ─────────────────────────────────────────────────────────────────── */
+section > h2 { font-size: 0.85em; color: var(--muted); margin-bottom: 0.75rem; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th, td { padding: 0.4rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 0.75em; text-transform: uppercase; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,0.03); }
+.side-buy  { color: var(--green); }
+.side-sell { color: var(--red); }
+.pnl-pos   { color: var(--green); }
+.pnl-neg   { color: var(--red); }

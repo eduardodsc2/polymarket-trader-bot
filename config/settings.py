@@ -57,7 +57,17 @@ class Settings(BaseSettings):
     # ── Reproducibility ───────────────────────────────────────────────────────
     random_seed: int = 42
 
-    # ── Circuit breakers ──────────────────────────────────────────────────────
+    # ── Circuit breaker (order executor) ─────────────────────────────────────
+    circuit_breaker_failure_threshold: int = Field(
+        default=3,
+        description="Consecutive fill failures before entering OPEN state",
+    )
+    circuit_breaker_cooldown_seconds: int = Field(
+        default=300,
+        description="Seconds to wait in OPEN state before moving to HALF_OPEN",
+    )
+
+    # ── Risk circuit breakers ─────────────────────────────────────────────────
     circuit_breaker_daily_loss_pct: float = Field(
         default=0.05,
         description="Auto-halt if daily PnL drops below this fraction of capital",
@@ -70,6 +80,14 @@ class Settings(BaseSettings):
         default=0.05,
         description="Maximum single position size as a fraction of total capital",
     )
+
+    # ── WebSocket (live data stream) ──────────────────────────────────────────
+    clob_ws_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+    ws_reconnect_delay_seconds: float = 5.0
+    ws_ping_interval_seconds: float = 30.0
+
+    # ── Dashboard ─────────────────────────────────────────────────────────────
+    dashboard_db_url: str = "postgresql+asyncpg://polymarket:changeme@db:5432/polymarket_bot"
 
     # ── Risk rules ────────────────────────────────────────────────────────────
     min_market_volume_usd: float = 10_000.0

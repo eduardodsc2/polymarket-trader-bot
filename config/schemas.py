@@ -219,3 +219,18 @@ class BacktestMetrics(BaseModel):
     total_trades: int
     brier_score: Optional[float] = None
     expected_value_per_trade: Optional[float] = None
+
+
+# ── On-chain reconciliation ───────────────────────────────────────────────────
+
+class ReconciliationReport(BaseModel):
+    """Result of Blockscout on-chain audit for a wallet."""
+    wallet_address: str
+    chain_id: int = 137
+    checked_at: datetime
+    onchain_usdc_balance: float
+    internal_cash_balance: float
+    balance_discrepancy: float          # onchain - internal; flag if abs > 0.10
+    unrecorded_transfers: list[str] = Field(default_factory=list)   # tx hashes
+    unconfirmed_tx_hashes: list[str] = Field(default_factory=list)  # open positions not yet confirmed
+    ok: bool                            # True if no discrepancies detected

@@ -37,15 +37,17 @@ services:
   dashboard:
     build:
       context: .
-      target: dashboard
+      dockerfile: dashboard/Dockerfile
     env_file: .env
+    environment:
+      BOT_MODE: ${BOT_MODE:-paper}
+      ACTIVE_STRATEGY: ${ACTIVE_STRATEGY:-ValueBetting}
+      INITIAL_CAPITAL_USD: ${INITIAL_CAPITAL_USD:-500}
     ports:
       - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - .:/app
     networks:
       - polymarket
     healthcheck:
