@@ -61,31 +61,56 @@ class DataStream:
     async def run(self) -> None:
         """
         Connect and stream until stop() is called.
-        Reconnects automatically on disconnect with exponential back-off.
-        """
-        delay = self._settings.ws_reconnect_delay_seconds
-        max_delay = 60.0
 
-        while not self._stop_event.is_set():
-            try:
-                await self._connect_and_stream()
-                delay = self._settings.ws_reconnect_delay_seconds   # reset on clean disconnect
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.warning(
-                    "WebSocket disconnected: {error} — reconnecting in {delay:.0f}s",
-                    error=exc,
-                    delay=delay,
-                )
-                self._connected = False
+        Uses the modern websockets.asyncio.client.connect() async-iterator API
+        which handles exponential back-off reconnect automatically. On each
+        ConnectionClosed we just `continue` to restart the outer loop.
+        """
+        from websockets.asyncio.client import connect
+        from websockets.exceptions import ConnectionClosed, ConnectionClosedOK
+
+        url = self._settings.clob_ws_url
+        logger.info("Connecting to CLOB WebSocket: {url}", url=url)
+
+        try:
+            async for ws in connect(
+                url,
+                ping_interval=self._settings.ws_ping_interval_seconds,
+                ping_timeout=self._settings.ws_ping_interval_seconds,
+            ):
                 try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(), timeout=delay
+                    self._connected = True
+                    logger.info(
+                        "WebSocket connected. Subscribing to {n} token(s).",
+                        n=len(self._token_ids),
                     )
-                except asyncio.TimeoutError:
-                    pass
-                delay = min(delay * 2, max_delay)
+                    await self._subscribe(ws)
+
+                    async for raw in ws:
+                        if self._stop_event.is_set():
+                            return
+                        await self._handle_message(raw)
+
+                except ConnectionClosedOK:
+                    self._connected = False
+                    if self._stop_event.is_set():
+                        break           # intentional shutdown
+                    logger.debug("WebSocket closed cleanly — reconnecting.")
+                    continue
+
+                except ConnectionClosed as exc:
+                    self._connected = False
+                    logger.warning(
+                        "WebSocket connection lost: {error} — reconnecting.",
+                        error=exc,
+                    )
+                    continue
+
+                finally:
+                    self._connected = False
+
+        except asyncio.CancelledError:
+            pass
 
         logger.info("DataStream stopped.")
 
@@ -98,32 +123,6 @@ class DataStream:
         return self._connected
 
     # ── Internal ──────────────────────────────────────────────────────────────
-
-    async def _connect_and_stream(self) -> None:
-        """Open one WebSocket session and pump messages until disconnect."""
-        import websockets  # imported here so tests can mock without a real socket
-
-        url = self._settings.clob_ws_url
-        logger.info("Connecting to CLOB WebSocket: {url}", url=url)
-
-        async with websockets.connect(
-            url,
-            ping_interval=self._settings.ws_ping_interval_seconds,
-            ping_timeout=self._settings.ws_ping_interval_seconds,
-        ) as ws:
-            self._connected = True
-            logger.info(
-                "WebSocket connected. Subscribing to {n} token(s).",
-                n=len(self._token_ids),
-            )
-            await self._subscribe(ws)
-
-            async for raw in ws:
-                if self._stop_event.is_set():
-                    break
-                await self._handle_message(raw)
-
-        self._connected = False
 
     async def _subscribe(self, ws: Any) -> None:
         """Send subscription message for all tracked token IDs."""
