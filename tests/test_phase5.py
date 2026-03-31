@@ -467,12 +467,45 @@ class TestPaperExecutor:
 
 class TestMonitor:
 
-    def test_reconcile_returns_ok_report(self, settings, empty_portfolio):
+    @pytest.mark.asyncio
+    async def test_reconcile_returns_ok_report(self, settings, empty_portfolio):
+        """In paper mode (no real HTTP client) reconciliation falls back and returns ok=True."""
         from live.monitor import Monitor
+        from unittest.mock import AsyncMock, MagicMock, patch
+
         monitor = Monitor(settings=settings)
-        report = monitor.reconcile_onchain_balance("0x1234", empty_portfolio)
+
+        # Mock httpx so no real network call is made
+        usdc_response = {
+            "items": [{
+                "token": {
+                    "address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+                    "decimals": "6",
+                },
+                "value": str(int(empty_portfolio.cash_usd * 1_000_000)),
+            }]
+        }
+        transfers_response = {"items": []}
+
+        def make_resp(data):
+            r = MagicMock()
+            r.raise_for_status = MagicMock()
+            r.json.return_value = data
+            return r
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__  = AsyncMock(return_value=False)
+        mock_client.get.side_effect = [
+            make_resp(usdc_response),
+            make_resp(transfers_response),
+        ]
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            report = await monitor.reconcile_onchain_balance("0x1234", empty_portfolio)
+
         assert report.ok is True
-        assert report.balance_discrepancy == 0.0
+        assert report.balance_discrepancy == pytest.approx(0.0, abs=0.01)
         assert report.chain_id == 137
 
     def test_render_dashboard_plain_no_rich(self, settings, empty_portfolio):

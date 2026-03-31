@@ -1,20 +1,47 @@
-version: "3.9"
+# Production overrides — merge with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
   bot:
     volumes:
       - ./data:/app/data
       - ./results:/app/results
-      # No source code live-mount in prod — use built image
+      # No source-code live-mount in prod — code is baked into the image
     restart: unless-stopped
+    environment:
+      BOT_MODE: live
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   db:
-    ports: []                    # Don't expose DB port externally in prod
+    ports: []                    # Do NOT expose DB port externally in prod
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   dashboard:
     restart: unless-stopped
+    environment:
+      BOT_MODE: live
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   scheduler:
     restart: unless-stopped
     profiles: []                 # Enable scheduler in prod (no profile gate)
+    environment:
+      BOT_MODE: live
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

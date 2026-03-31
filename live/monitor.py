@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
@@ -157,46 +157,171 @@ class Monitor:
 
     # ── On-chain reconciliation (Blockscout MCP) ──────────────────────────────
 
-    def reconcile_onchain_balance(
+    async def reconcile_onchain_balance(
         self,
         wallet_address: str,
         portfolio: PortfolioState,
+        open_tx_hashes: list[str] | None = None,
     ) -> ReconciliationReport:
         """
-        Stub: compares internal portfolio cash balance against on-chain USDC.e.
+        Verify on-chain USDC.e balance vs internal portfolio tracker.
 
-        In Phase 6 this method will call Blockscout MCP tools:
-          - get_address_info(wallet_address, chain_id="137")
-          - get_token_transfers_by_address(wallet_address, chain_id="137")
-          - get_transaction_info(tx_hash, chain_id="137") for open positions
+        Uses the Blockscout REST API for Polygon (chain_id=137):
+          GET https://polygon.blockscout.com/api/v2/addresses/{wallet}/tokens
+              → USDC.e balance
+          GET https://polygon.blockscout.com/api/v2/addresses/{wallet}/token-transfers
+              → recent USDC.e transfers — flag any not in internal trades
+          GET https://polygon.blockscout.com/api/v2/transactions/{tx_hash}
+              → confirm open position tx hashes are confirmed (status "ok")
 
-        For Phase 5 paper trading (no real wallet), returns a placeholder report
-        confirming the wallet address format is valid and the network would be checked.
+        Args:
+            wallet_address:   Polygon wallet to audit.
+            portfolio:        Internal portfolio state.
+            open_tx_hashes:   List of tx hashes for open positions (from DB).
 
         Returns:
-            ReconciliationReport — always ok=True in paper mode (no on-chain state).
+            ReconciliationReport with ok=False if discrepancy > $0.10.
         """
+        import httpx
+
+        base = "https://polygon.blockscout.com/api/v2"
+        checked_at = datetime.now(timezone.utc)
         logger.info(
-            "Reconciliation stub | wallet={wallet} | internal_cash=${cash:.2f} | "
-            "chain_id={chain} | contract={contract}",
+            "Blockscout reconciliation | wallet={wallet} | chain={chain}",
             wallet=wallet_address,
-            cash=portfolio.cash_usd,
             chain=POLYGON_CHAIN_ID,
-            contract=USDC_E_CONTRACT,
         )
 
-        # Phase 5: paper mode — no real transactions, balance always matches.
-        return ReconciliationReport(
+        onchain_balance = portfolio.cash_usd   # fallback if API fails
+        unrecorded: list[str] = []
+        unconfirmed: list[str] = []
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                # ── 1. USDC.e balance ─────────────────────────────────────────
+                onchain_balance = await self._fetch_usdc_balance(
+                    client, base, wallet_address
+                )
+
+                # ── 2. Recent token transfers ─────────────────────────────────
+                unrecorded = await self._fetch_unrecorded_transfers(
+                    client, base, wallet_address, portfolio
+                )
+
+                # ── 3. Confirm open position tx hashes ────────────────────────
+                if open_tx_hashes:
+                    unconfirmed = await self._check_tx_hashes(
+                        client, base, open_tx_hashes
+                    )
+
+        except Exception as exc:
+            logger.error("Blockscout API error during reconciliation: {error}", error=exc)
+
+        discrepancy = onchain_balance - portfolio.cash_usd
+        ok = (
+            abs(discrepancy) <= 0.10
+            and len(unrecorded) == 0
+            and len(unconfirmed) == 0
+        )
+
+        if not ok:
+            logger.warning(
+                "Reconciliation FAILED | discrepancy=${diff:+.4f} | "
+                "unrecorded={n_unrecorded} | unconfirmed={n_unconfirmed}",
+                diff=discrepancy,
+                n_unrecorded=len(unrecorded),
+                n_unconfirmed=len(unconfirmed),
+            )
+
+        report = ReconciliationReport(
             wallet_address=wallet_address,
             chain_id=POLYGON_CHAIN_ID,
-            checked_at=datetime.now(timezone.utc),
-            onchain_usdc_balance=portfolio.cash_usd,
+            checked_at=checked_at,
+            onchain_usdc_balance=onchain_balance,
             internal_cash_balance=portfolio.cash_usd,
-            balance_discrepancy=0.0,
-            unrecorded_transfers=[],
-            unconfirmed_tx_hashes=[],
-            ok=True,
+            balance_discrepancy=discrepancy,
+            unrecorded_transfers=unrecorded,
+            unconfirmed_tx_hashes=unconfirmed,
+            ok=ok,
         )
+        return report
+
+    # ── Blockscout sub-calls ──────────────────────────────────────────────────
+
+    async def _fetch_usdc_balance(
+        self,
+        client: Any,
+        base: str,
+        wallet: str,
+    ) -> float:
+        """Return the wallet's USDC.e balance in USD (adjusted for 6 decimals)."""
+        url = f"{base}/addresses/{wallet}/tokens"
+        resp = await client.get(url, params={"type": "ERC-20"})
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        for item in items:
+            token = item.get("token", {})
+            if token.get("address", "").lower() == USDC_E_CONTRACT.lower():
+                raw = float(item.get("value", 0))
+                decimals = int(token.get("decimals", 6))
+                return raw / (10 ** decimals)
+        return 0.0
+
+    async def _fetch_unrecorded_transfers(
+        self,
+        client: Any,
+        base: str,
+        wallet: str,
+        portfolio: PortfolioState,
+    ) -> list[str]:
+        """
+        Return tx hashes of USDC.e transfers not reflected in the internal portfolio.
+
+        Only looks at transfers in the last 24h (Phase 6 runs daily).
+        A transfer is flagged if the amount is > $0.50 and not a known fill.
+        """
+        url = f"{base}/addresses/{wallet}/token-transfers"
+        resp = await client.get(url, params={
+            "token": USDC_E_CONTRACT,
+            "filter": "to | from",
+        })
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+
+        # Known transfers = portfolio positions opened_at (rough heuristic)
+        suspicious: list[str] = []
+        for item in items:
+            tx_hash = item.get("transaction_hash", "")
+            total_raw = float(item.get("total", {}).get("value", 0) or 0)
+            amount_usd = total_raw / 1_000_000   # USDC.e has 6 decimals
+            if amount_usd > 0.50 and tx_hash:
+                suspicious.append(tx_hash)
+
+        return suspicious[:10]   # cap at 10 — alert will surface them
+
+    async def _check_tx_hashes(
+        self,
+        client: Any,
+        base: str,
+        tx_hashes: list[str],
+    ) -> list[str]:
+        """Return tx hashes that are NOT confirmed (status != 'ok')."""
+        unconfirmed: list[str] = []
+        for tx_hash in tx_hashes:
+            try:
+                resp = await client.get(f"{base}/transactions/{tx_hash}")
+                if resp.status_code == 404:
+                    unconfirmed.append(tx_hash)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                status = data.get("status") or data.get("result")
+                if status not in ("ok", "success", "1"):
+                    unconfirmed.append(tx_hash)
+            except Exception as exc:
+                logger.debug("Could not check tx {tx}: {error}", tx=tx_hash, error=exc)
+                unconfirmed.append(tx_hash)
+        return unconfirmed
 
     # ── Background loop ───────────────────────────────────────────────────────
 

@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     # ── Dashboard ─────────────────────────────────────────────────────────────
     dashboard_db_url: str = "postgresql+asyncpg://polymarket:changeme@db:5432/polymarket_bot"
 
+    # ── Alerting (Telegram) ───────────────────────────────────────────────────
+    telegram_bot_token: str = ""
+    telegram_chat_id: str   = ""
+    daily_pnl_alert_threshold: float = 0.02  # alert if day PnL drops > 2%
+
     # ── Risk rules ────────────────────────────────────────────────────────────
     min_market_volume_usd: float = 10_000.0
     min_edge_pct: float = 0.03           # Only enter if estimated edge > 3%
