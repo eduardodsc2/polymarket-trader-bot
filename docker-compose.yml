@@ -44,8 +44,9 @@ services:
     env_file: .env
     environment:
       BOT_MODE: ${BOT_MODE:-paper}
-      ACTIVE_STRATEGY: ${ACTIVE_STRATEGY:-ValueBetting}
+      PAPER_STRATEGY: ${PAPER_STRATEGY:-market_maker}
       INITIAL_CAPITAL_USD: ${INITIAL_CAPITAL_USD:-500}
+      DASHBOARD_DB_URL: postgresql+asyncpg://polymarket:${DB_PASSWORD:-changeme}@db:5432/polymarket_bot
     ports:
       - "8080:8080"
     depends_on:

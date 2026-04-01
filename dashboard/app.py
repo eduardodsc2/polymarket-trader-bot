@@ -1,79 +1,155 @@
 """
-FastAPI dashboard backend — Phase 5.
+FastAPI dashboard backend — DB-backed (reads from PostgreSQL).
 
 Endpoints:
   GET  /health              → Docker health check
-  GET  /api/snapshot        → Full portfolio state (initial page load)
-  GET  /api/trades          → Recent trades (last 50)
-  GET  /api/metrics         → Sharpe, drawdown, win rate
-  WS   /ws                  → Push stream: fills, alerts, PnL updates
-
-Architecture:
-  - Bot container writes fills + PnL to a shared in-memory queue (or Postgres LISTEN/NOTIFY in Phase 6)
-  - Dashboard is read-only: it never writes to DB or calls CLOB API
-  - WebSocket broadcasts: on each new fill the bot calls notify_fill(), which pushes to all connected clients
-  - Dashboard container can be restarted at any time without affecting the bot
+  GET  /api/snapshot        → Latest portfolio snapshot from DB
+  GET  /api/trades          → Recent trades from DB (last 50)
+  GET  /api/metrics         → Win rate, PnL, trade counts from DB
+  WS   /ws                  → Push stream: polls DB every 5s, pushes on change
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-from collections import deque
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
+import asyncpg
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="Polymarket Dashboard", version="0.5.0")
+app = FastAPI(title="Polymarket Dashboard", version="0.6.0")
 
-# ── Static files ──────────────────────────────────────────────────────────────
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 
-# ── In-memory state (replaced by DB in Phase 6) ───────────────────────────────
+# ── DB pool ───────────────────────────────────────────────────────────────────
 
-class _State:
-    def __init__(self) -> None:
-        self.mode: str = os.getenv("BOT_MODE", "paper")
-        self.active_strategy: str = os.getenv("ACTIVE_STRATEGY", "ValueBetting")
-        self.initial_capital: float = float(os.getenv("INITIAL_CAPITAL_USD", "500"))
-        self.cash_usd: float = self.initial_capital
-        self.realized_pnl: float = 0.0
-        self.trades: deque[dict] = deque(maxlen=500)
-        self.risk_alerts: list[str] = []
-        self.circuit_state: str = "closed"
+_pool: asyncpg.Pool | None = None
 
-    def portfolio_snapshot(self) -> dict:
-        total = self.cash_usd + self.realized_pnl
+_MODE = os.getenv("BOT_MODE", "paper")
+_STRATEGY = os.getenv("PAPER_STRATEGY", os.getenv("ACTIVE_STRATEGY", "market_maker"))
+_INITIAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL_USD", "500"))
+
+
+def _db_url() -> str:
+    url = os.getenv(
+        "DASHBOARD_DB_URL",
+        "postgresql+asyncpg://polymarket:changeme@db:5432/polymarket_bot",
+    )
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+async def _get_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(_db_url(), min_size=1, max_size=3)
+    return _pool
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    for _ in range(10):
+        try:
+            await _get_pool()
+            return
+        except Exception:
+            await asyncio.sleep(2)
+
+
+# ── Serialization helpers ─────────────────────────────────────────────────────
+
+def _row(record: asyncpg.Record) -> dict:
+    """Convert asyncpg Record to JSON-serializable dict."""
+    out: dict = {}
+    for key, val in record.items():
+        if isinstance(val, datetime):
+            out[key] = val.isoformat()
+        elif isinstance(val, Decimal):
+            out[key] = float(val)
+        else:
+            out[key] = val
+    return out
+
+
+# ── DB queries ────────────────────────────────────────────────────────────────
+
+async def _latest_snapshot() -> dict:
+    pool = await _get_pool()
+    record = await pool.fetchrow(
+        "SELECT * FROM portfolio_snapshots ORDER BY snapshot_at DESC LIMIT 1"
+    )
+    if record is None:
         return {
-            "mode": self.mode,
-            "strategy": self.active_strategy,
-            "total_value_usd": round(total, 2),
-            "cash_usd": round(self.cash_usd, 2),
-            "realized_pnl": round(self.realized_pnl, 2),
+            "id": None,
+            "mode": _MODE,
+            "strategy": _STRATEGY,
+            "circuit_state": "closed",
+            "total_value_usd": _INITIAL_CAPITAL,
+            "cash_usd": _INITIAL_CAPITAL,
+            "positions_value_usd": 0.0,
+            "realized_pnl": 0.0,
             "open_positions": 0,
-            "circuit_state": self.circuit_state,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
-    def add_fill(self, fill: dict) -> None:
-        fill.setdefault("received_at", datetime.now(timezone.utc).isoformat())
-        self.trades.appendleft(fill)
-        if fill.get("side") == "BUY":
-            self.cash_usd = max(0.0, self.cash_usd - fill.get("filled_size_usd", 0))
-        else:
-            self.cash_usd += fill.get("filled_size_usd", 0)
+    d = _row(record)
+    d["timestamp"] = d.pop("snapshot_at")
+    d.setdefault("mode", _MODE)
+    d.setdefault("strategy", _STRATEGY)
+    d.setdefault("circuit_state", "closed")
+    return d
 
 
-_state = _State()
+async def _recent_trades(limit: int = 50) -> list[dict]:
+    pool = await _get_pool()
+    rows = await pool.fetch(
+        "SELECT * FROM trades ORDER BY executed_at DESC LIMIT $1", limit
+    )
+    result = []
+    for record in rows:
+        d = _row(record)
+        d["filled_size_usd"] = d.pop("size_usd", 0.0)
+        d["fill_price"] = d.pop("price", 0.0)
+        d["timestamp"] = d.pop("executed_at")
+        d.setdefault("slippage_bps", 0)
+        result.append(d)
+    return result
 
 
-# ── WebSocket connection manager ──────────────────────────────────────────────
+async def _compute_metrics() -> dict:
+    pool = await _get_pool()
+    record = await pool.fetchrow(
+        """
+        SELECT
+            COUNT(*)                                                     AS total_trades,
+            COUNT(*) FILTER (WHERE side = 'SELL' AND size_usd > 0)      AS wins,
+            COUNT(*) FILTER (WHERE side = 'SELL')                        AS total_sells,
+            COALESCE(
+                SUM(CASE WHEN side = 'SELL' THEN size_usd - fee_usd ELSE 0 END), 0
+            )                                                            AS realized_pnl
+        FROM trades
+        """
+    )
+    d = _row(record) if record else {}
+    total_sells = int(d.get("total_sells", 0))
+    wins = int(d.get("wins", 0))
+    return {
+        "total_trades": int(d.get("total_trades", 0)),
+        "win_rate": round(wins / total_sells, 4) if total_sells > 0 else 0.0,
+        "realized_pnl": round(float(d.get("realized_pnl", 0.0)), 2),
+        "sharpe_ratio": None,
+        "max_drawdown_pct": None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── WebSocket manager ─────────────────────────────────────────────────────────
 
 class _ConnectionManager:
     def __init__(self) -> None:
@@ -101,6 +177,8 @@ class _ConnectionManager:
 
 _manager = _ConnectionManager()
 
+POLL_INTERVAL_SECONDS = 5
+
 
 # ── REST endpoints ────────────────────────────────────────────────────────────
 
@@ -111,34 +189,22 @@ async def health() -> dict:
 
 @app.get("/api/snapshot")
 async def snapshot() -> dict:
-    return _state.portfolio_snapshot()
+    return await _latest_snapshot()
 
 
 @app.get("/api/trades")
 async def trades(limit: int = 50) -> dict:
-    return {"trades": list(_state.trades)[:limit]}
+    return {"trades": await _recent_trades(limit)}
 
 
 @app.get("/api/metrics")
 async def metrics() -> dict:
-    """Rolling metrics computed from in-memory trades."""
-    fills = list(_state.trades)
-    total = len(fills)
-    wins = sum(1 for f in fills if f.get("side") == "SELL" and f.get("filled_size_usd", 0) > 0)
-    win_rate = wins / total if total > 0 else 0.0
-    return {
-        "total_trades": total,
-        "win_rate": round(win_rate, 4),
-        "realized_pnl": round(_state.realized_pnl, 2),
-        "sharpe_ratio": None,   # requires equity time-series (Phase 6)
-        "max_drawdown_pct": None,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    return await _compute_metrics()
 
 
 @app.get("/api/alerts")
 async def alerts() -> dict:
-    return {"alerts": _state.risk_alerts}
+    return {"alerts": []}
 
 
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
@@ -146,52 +212,28 @@ async def alerts() -> dict:
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     await _manager.connect(ws)
+    last_id: Any = None
     try:
-        # Send current state immediately on connect
-        await ws.send_text(json.dumps({"type": "snapshot", **_state.portfolio_snapshot()}))
-        # Keep alive — receive messages (ping/pong or client commands)
+        snap = await _latest_snapshot()
+        await ws.send_text(json.dumps({"type": "snapshot", **snap}))
+        last_id = snap.get("id")
+
         while True:
             try:
-                msg = await asyncio.wait_for(ws.receive_text(), timeout=30.0)
-                # Acknowledge client heartbeat
+                # Wait for client message (ping) with 5s timeout
+                msg = await asyncio.wait_for(ws.receive_text(), timeout=POLL_INTERVAL_SECONDS)
                 if msg == "ping":
                     await ws.send_text(json.dumps({"type": "pong"}))
             except asyncio.TimeoutError:
-                # Send keepalive so connection is not dropped by proxies
-                await ws.send_text(json.dumps({"type": "ping"}))
+                # Poll DB; push snapshot only when it has changed
+                snap = await _latest_snapshot()
+                if snap.get("id") != last_id:
+                    last_id = snap.get("id")
+                    await ws.send_text(json.dumps({"type": "snapshot", **snap}))
     except WebSocketDisconnect:
         pass
     finally:
         _manager.disconnect(ws)
-
-
-# ── Internal push API (called by bot process) ─────────────────────────────────
-
-async def notify_fill(fill: dict) -> None:
-    """
-    Called by the bot after each paper fill.
-    Updates in-memory state and broadcasts to all WebSocket clients.
-    """
-    _state.add_fill(fill)
-    await _manager.broadcast({
-        "type": "fill",
-        "fill": fill,
-        "portfolio": _state.portfolio_snapshot(),
-    })
-
-
-async def notify_alert(alert: str) -> None:
-    """Called by risk manager when a rule fires."""
-    _state.risk_alerts.append(alert)
-    if len(_state.risk_alerts) > 50:
-        _state.risk_alerts = _state.risk_alerts[-50:]
-    await _manager.broadcast({"type": "alert", "message": alert})
-
-
-async def notify_circuit_state(state: str) -> None:
-    """Called by executor when circuit breaker changes state."""
-    _state.circuit_state = state
-    await _manager.broadcast({"type": "circuit", "state": state})
 
 
 # ── Main HTML page ────────────────────────────────────────────────────────────
