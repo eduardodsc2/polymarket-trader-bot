@@ -125,46 +125,80 @@ class DataStream:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _subscribe(self, ws: Any) -> None:
-        """Send subscription message for all tracked token IDs."""
-        msg = {
-            "type": "subscribe",
-            "channel": "price_change",
-            "markets": self._token_ids,
-        }
-        await ws.send(json.dumps(msg))
-        logger.debug("Sent subscription for {n} markets.", n=len(self._token_ids))
+        """Send subscription message for all tracked token IDs.
+
+        Polymarket CLOB WebSocket format (ws/market channel):
+          {"assets_ids": ["<token_id>", ...], "type": "market"}
+
+        The server drops connections with too many assets in one frame,
+        so we batch into groups of MAX_ASSETS_PER_SUB.
+        """
+        MAX_ASSETS_PER_SUB = 20
+        for i in range(0, len(self._token_ids), MAX_ASSETS_PER_SUB):
+            batch = self._token_ids[i : i + MAX_ASSETS_PER_SUB]
+            msg = {"assets_ids": batch, "type": "market"}
+            await ws.send(json.dumps(msg))
+        logger.debug("Sent subscription for {n} assets.", n=len(self._token_ids))
 
     async def _handle_message(self, raw: str | bytes) -> None:
-        """Parse a WebSocket message and dispatch price updates."""
+        """Parse a WebSocket message and dispatch price updates.
+
+        Polymarket CLOB WebSocket sends two message shapes:
+
+        1. Initial orderbook snapshot (list of objects, one per subscribed token):
+           [{"asset_id": "...", "bids": [...], "asks": [...], "timestamp": "..."}, ...]
+
+        2. Price change event (object with price_changes list):
+           {"market": "0x...", "price_changes": [
+               {"asset_id": "...", "price": "0.95", "best_bid": "...", "best_ask": "..."},
+               ...
+           ]}
+        """
         try:
-            data: dict = json.loads(raw)
+            data = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             logger.debug("Unparseable WebSocket frame: {raw!r}", raw=raw)
             return
 
-        event_type = data.get("event_type") or data.get("type")
+        # Shape 1 — initial snapshot: list of orderbook objects
+        if isinstance(data, list):
+            for book in data:
+                token_id = book.get("asset_id")
+                # Derive mid price from best bid/ask if available
+                bids = book.get("bids", [])
+                asks = book.get("asks", [])
+                price = None
+                if bids and asks:
+                    try:
+                        best_bid = float(bids[0]["price"])
+                        best_ask = float(asks[0]["price"])
+                        price = (best_bid + best_ask) / 2.0
+                    except (KeyError, ValueError, IndexError):
+                        pass
+                if token_id and price is not None:
+                    try:
+                        await self._on_price_update(token_id, price)
+                    except Exception as exc:
+                        logger.error("Error in on_price_update (snapshot): {error}", error=exc)
+            return
 
-        if event_type == "price_change":
-            await self._dispatch_price_change(data)
-        elif event_type == "last_trade_price":
-            token_id = data.get("asset_id") or data.get("token_id")
-            price_str = data.get("price")
-            if token_id and price_str is not None:
-                await self._on_price_update(token_id, float(price_str))
-        # Other event types (orderbook, book, tick_size_change) are ignored for now
-
-    async def _dispatch_price_change(self, data: dict) -> None:
-        """Handle a price_change event which may contain multiple assets."""
-        assets = data.get("assets", [])
-        if not assets and "asset_id" in data:
-            assets = [data]
-        for asset in assets:
-            token_id = asset.get("asset_id") or asset.get("token_id")
-            price_str = asset.get("price")
-            if token_id and price_str is not None:
-                try:
-                    await self._on_price_update(token_id, float(price_str))
-                except Exception as exc:
-                    logger.error(
-                        "Error in on_price_update callback: {error}", error=exc
-                    )
+        # Shape 2 — price_changes event
+        price_changes = data.get("price_changes")
+        if price_changes:
+            for change in price_changes:
+                token_id = change.get("asset_id")
+                price_str = change.get("price")
+                if not price_str:
+                    # Fall back to mid of best_bid/best_ask
+                    bid = change.get("best_bid")
+                    ask = change.get("best_ask")
+                    if bid and ask:
+                        try:
+                            price_str = str((float(bid) + float(ask)) / 2.0)
+                        except ValueError:
+                            pass
+                if token_id and price_str is not None:
+                    try:
+                        await self._on_price_update(token_id, float(price_str))
+                    except Exception as exc:
+                        logger.error("Error in on_price_update (price_change): {error}", error=exc)

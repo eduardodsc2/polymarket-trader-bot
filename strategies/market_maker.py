@@ -64,7 +64,7 @@ class MarketMaker(BaseStrategy):
         self.min_price = min_price
         self.max_price = max_price
 
-        # Build token → condition_id index
+        # Build token → condition_id index (for condition_id in OrderRequest)
         self._token_to_condition: dict[str, str] = {}
         for cond_id, market in market_data.items():
             if market.yes_token_id:
@@ -72,17 +72,20 @@ class MarketMaker(BaseStrategy):
             if market.no_token_id:
                 self._token_to_condition[market.no_token_id] = cond_id
 
-        # Per-condition runtime state
-        self._price_history: dict[str, list[float]] = {}  # condition_id → recent prices
-        self._in_position: set[str] = set()               # conditions where we hold tokens
-        self._entry_price: dict[str, float] = {}          # condition_id → buy entry price
+        # Per-TOKEN runtime state — indexed by token_id, not condition_id.
+        # Each YES and NO token is traded independently to avoid cross-token fills:
+        # buying NO and selling YES on the same condition_id would be a phantom trade.
+        self._price_history: dict[str, list[float]] = {}  # token_id → recent prices
+        self._in_position: set[str] = set()               # token_ids where we hold tokens
+        self._entry_price: dict[str, float] = {}          # token_id → buy entry price
 
     # ── Required overrides ──────────────────────────────────────────────────────
 
     def on_price_update(
         self, event: PriceUpdateEvent, portfolio: PortfolioSnapshot
     ) -> list[OrderRequest]:
-        cond_id = self._token_to_condition.get(event.token_id)
+        token_id = event.token_id
+        cond_id = self._token_to_condition.get(token_id)
         if cond_id is None:
             return []
 
@@ -90,8 +93,8 @@ class MarketMaker(BaseStrategy):
         if price < self.min_price or price > self.max_price:
             return []  # too close to resolution boundary — don't quote
 
-        # Update rolling price history
-        hist = self._price_history.setdefault(cond_id, [])
+        # Update rolling price history keyed by token_id
+        hist = self._price_history.setdefault(token_id, [])
         hist.append(price)
         if len(hist) > self.window:
             hist.pop(0)
@@ -103,25 +106,30 @@ class MarketMaker(BaseStrategy):
         buy_threshold = fair_value - self.base_spread / 2.0
         orders: list[OrderRequest] = []
 
-        if cond_id in self._in_position:
+        if token_id in self._in_position:
             # ── Sell side: exit when price recovers above entry + full spread ──
-            entry = self._entry_price[cond_id]
+            entry = self._entry_price[token_id]
             sell_target = entry + self.base_spread
             if price >= sell_target:
+                # Actual sell proceeds = tokens_bought × current_price
+                # tokens_bought = order_size_usdc / entry_price
+                tokens_owned = self.order_size_usdc / entry
+                actual_sell_usd = tokens_owned * price
                 orders.append(
                     OrderRequest(
                         order_id=str(uuid.uuid4()),
                         strategy=self.name,
                         condition_id=cond_id,
-                        token_id=event.token_id,
+                        token_id=token_id,
                         side="SELL",
-                        size_usd=self.order_size_usdc,
+                        size_usd=actual_sell_usd,
                         limit_price=None,   # market sell — take the profit now
                         timestamp=event.timestamp,
+                        edge=self.base_spread,
                     )
                 )
-                self._in_position.discard(cond_id)
-                self._entry_price.pop(cond_id, None)
+                self._in_position.discard(token_id)
+                self._entry_price.pop(token_id, None)
         else:
             # ── Buy side: enter when price drops to buy threshold ──────────────
             max_pos_usd = portfolio.total_value_usd * self.max_inventory_pct
@@ -135,20 +143,24 @@ class MarketMaker(BaseStrategy):
                         order_id=str(uuid.uuid4()),
                         strategy=self.name,
                         condition_id=cond_id,
-                        token_id=event.token_id,
+                        token_id=token_id,
                         side="BUY",
                         size_usd=self.order_size_usdc,
                         limit_price=None,   # market buy
                         timestamp=event.timestamp,
+                        edge=self.base_spread,
                     )
                 )
-                self._in_position.add(cond_id)
-                self._entry_price[cond_id] = price
+                self._in_position.add(token_id)
+                self._entry_price[token_id] = price
 
         return orders
 
     def on_market_resolution(self, event: MarketResolutionEvent) -> None:
+        # Clean up all tokens belonging to this condition
         cond_id = event.condition_id
-        self._price_history.pop(cond_id, None)
-        self._in_position.discard(cond_id)
-        self._entry_price.pop(cond_id, None)
+        resolved_tokens = [t for t, c in self._token_to_condition.items() if c == cond_id]
+        for token_id in resolved_tokens:
+            self._price_history.pop(token_id, None)
+            self._in_position.discard(token_id)
+            self._entry_price.pop(token_id, None)

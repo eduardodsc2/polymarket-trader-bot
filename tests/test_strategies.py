@@ -284,6 +284,58 @@ class TestMarketMaker:
         results = self._feed_prices(s, [0.47, 0.47])
         assert all(r == [] for r in results)
 
+    def test_no_token_id_cross_trades(self) -> None:
+        """
+        Regression: buying YES token must NOT trigger SELL of NO token.
+
+        With the old condition_id-based tracking, buying yes_tok set
+        _in_position["cond_1"]. Then when no_tok ticked at a high price,
+        the strategy would emit a SELL on no_tok (which was never bought).
+        The fix keys _in_position by token_id, so each token is independent.
+        """
+        market_data = {"cond_1": _market("cond_1", "yes_tok", "no_tok")}
+        s = MarketMaker(market_data=market_data, base_spread=0.04, window=3, order_size_usdc=200.0)
+        snap = _snapshot()
+
+        # Fill window for yes_tok and trigger a BUY at 0.47
+        for p in [0.50, 0.50, 0.50, 0.47]:
+            s.on_price_update(_price_event("yes_tok", p), snap)
+
+        assert "yes_tok" in s._in_position
+        assert "no_tok" not in s._in_position  # no_tok was never traded
+
+        # Feed a high price on no_tok — should NOT trigger a SELL (no position)
+        # (no_tok hasn't even filled its price window yet)
+        orders = s.on_price_update(_price_event("no_tok", 0.90), snap)
+        assert orders == [], "no_tok must not trigger SELL when only yes_tok was bought"
+
+    def test_sell_size_reflects_actual_proceeds(self) -> None:
+        """
+        SELL size_usd must be tokens_bought × sell_price, not the fixed BUY size.
+
+        BUY at 0.40 with $200: tokens = 200 / 0.40 = 500
+        SELL at 0.50: proceeds = 500 × 0.50 = $250  (not $200)
+        """
+        market_data = {"cond_1": _market("cond_1", "yes_tok", "no_tok")}
+        s = MarketMaker(market_data=market_data, base_spread=0.04, window=3, order_size_usdc=200.0)
+        snap = _snapshot()
+
+        # Build window and trigger BUY at 0.40
+        for p in [0.44, 0.44, 0.44, 0.40]:  # fair=0.44, threshold=0.42, 0.40 < 0.42 → BUY
+            s.on_price_update(_price_event("yes_tok", p), snap)
+
+        entry = s._entry_price.get("yes_tok")
+        assert entry is not None
+        assert entry == pytest.approx(0.40, abs=0.01)
+
+        # Now trigger SELL: sell_target = 0.40 + 0.04 = 0.44
+        orders = s.on_price_update(_price_event("yes_tok", 0.44), snap)
+        assert len(orders) == 1
+        sell_order = orders[0]
+        assert sell_order.side == "SELL"
+        expected_proceeds = (200.0 / entry) * 0.44
+        assert sell_order.size_usd == pytest.approx(expected_proceeds, rel=0.01)
+
 
 # ── CalibrationBetting ─────────────────────────────────────────────────────────
 

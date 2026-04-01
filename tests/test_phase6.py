@@ -125,16 +125,15 @@ class TestLiveExecutor:
         mock_client.post_order.return_value = self._mock_clob_response()
         executor._clob = mock_client
 
-        # Patch DB helpers directly so no real DB is needed
-        with patch("live.executor.insert_live_order", new_callable=AsyncMock), \
-             patch("live.executor.insert_trade",      new_callable=AsyncMock), \
-             patch("live.executor.AsyncSession") as mock_sess_cls:
-            mock_sess = AsyncMock()
-            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_sess.__aexit__  = AsyncMock(return_value=False)
-            mock_sess.begin      = MagicMock(return_value=mock_sess)
-            mock_sess_cls.return_value = mock_sess
+        # Patch DB helpers and session factory so no real DB is needed
+        mock_sess = AsyncMock()
+        mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+        mock_sess.__aexit__  = AsyncMock(return_value=False)
+        mock_sess.begin      = MagicMock(return_value=mock_sess)
+        executor._session_factory = MagicMock(return_value=mock_sess)
 
+        with patch("live.executor.insert_live_order", new_callable=AsyncMock), \
+             patch("live.executor.insert_trade",      new_callable=AsyncMock):
             # portfolio=None skips risk checks (tests fill path independently)
             fill = await executor.submit(order_request, current_price=0.64, portfolio=None)
 
@@ -211,15 +210,14 @@ class TestLiveExecutor:
         mock_client.post_order.return_value = self._mock_clob_response()
         executor._clob = mock_client
 
-        with patch("live.executor.insert_live_order", new_callable=AsyncMock), \
-             patch("live.executor.insert_trade",      new_callable=AsyncMock), \
-             patch("live.executor.AsyncSession") as mock_sess_cls:
-            mock_sess = AsyncMock()
-            mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_sess.__aexit__  = AsyncMock(return_value=False)
-            mock_sess.begin      = MagicMock(return_value=mock_sess)
-            mock_sess_cls.return_value = mock_sess
+        mock_sess = AsyncMock()
+        mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
+        mock_sess.__aexit__  = AsyncMock(return_value=False)
+        mock_sess.begin      = MagicMock(return_value=mock_sess)
+        executor._session_factory = MagicMock(return_value=mock_sess)
 
+        with patch("live.executor.insert_live_order", new_callable=AsyncMock), \
+             patch("live.executor.insert_trade",      new_callable=AsyncMock):
             fill = await executor.submit(order_request, current_price=0.64, portfolio=None)
 
         assert fill is not None

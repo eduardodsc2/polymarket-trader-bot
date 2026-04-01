@@ -201,6 +201,8 @@ class Portfolio:
         strategies (e.g. SumToOneArb) only the winning token receives a payout
         and the losing token is separately expired.
         """
+        import uuid
+        from config.schemas import OrderFill
         pos = self._positions.pop(token_id, None)
         if pos is None:
             return
@@ -219,6 +221,18 @@ class Portfolio:
             fee,
             pnl,
         )
+        # Emit a synthetic SELL Trade so win_rate / profit_factor can be computed
+        synthetic_fill = OrderFill(
+            order_id=str(uuid.uuid4()),
+            token_id=token_id,
+            side="SELL",
+            requested_size_usd=net_payout,
+            filled_size_usd=net_payout,
+            fill_price=1.0,
+            fee_usd=fee,
+            timestamp=timestamp,
+        )
+        self._record_trade(synthetic_fill, pos.condition_id)
 
     def expire_token(self, token_id: str) -> None:
         """
@@ -227,6 +241,8 @@ class Portfolio:
         Called by the engine to expire only the losing token when both YES and NO
         positions exist in the same condition (multi-leg strategies).
         """
+        import uuid
+        from config.schemas import OrderFill
         pos = self._positions.pop(token_id, None)
         if pos is None:
             return
@@ -238,6 +254,18 @@ class Portfolio:
             pos.tokens,
             loss,
         )
+        # Emit a synthetic SELL Trade at $0 so losses are counted in win_rate
+        synthetic_fill = OrderFill(
+            order_id=str(uuid.uuid4()),
+            token_id=token_id,
+            side="SELL",
+            requested_size_usd=0.0,
+            filled_size_usd=0.0,
+            fill_price=0.0,
+            fee_usd=0.0,
+            timestamp=datetime.now(),
+        )
+        self._record_trade(synthetic_fill, pos.condition_id)
 
     # ── Mark-to-market ─────────────────────────────────────────────────────────
 

@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from config.schemas import OrderFill, PortfolioSnapshot, ReconciliationReport
 from config.settings import Settings
@@ -55,6 +55,16 @@ def get_engine() -> AsyncEngine:
     if _engine is None:
         raise RuntimeError("DB not initialised — call init_db() first")
     return _engine
+
+
+def make_session_factory(engine: AsyncEngine) -> async_sessionmaker:
+    """
+    Return an async_sessionmaker bound to *engine*.
+
+    expire_on_commit=False prevents lazy-load errors after commit in async
+    sessions (SQLAlchemy async best practice).
+    """
+    return async_sessionmaker(engine, expire_on_commit=False)
 
 
 # ── insert_live_order ─────────────────────────────────────────────────────────

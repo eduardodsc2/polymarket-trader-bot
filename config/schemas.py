@@ -70,7 +70,7 @@ class Trade(BaseModel):
     condition_id: str
     token_id: str
     side: Literal["BUY", "SELL"]
-    size_usd: float = Field(..., gt=0)
+    size_usd: float = Field(..., ge=0)
     price: float = Field(..., ge=0.0, le=1.0)
     fee_usd: float = 0.0
     mode: Literal["backtest", "paper", "live"]
@@ -173,6 +173,7 @@ class OrderRequest(BaseModel):
     size_usd: float = Field(..., gt=0)
     limit_price: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     timestamp: datetime
+    edge: float = 0.0  # Estimated edge for risk checks (spread for MarketMaker)
 
 
 class OrderFill(BaseModel):

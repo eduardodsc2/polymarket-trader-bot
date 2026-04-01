@@ -21,11 +21,9 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from config.settings import Settings
 from live.alerting import Alerter
-from live.db import build_engine, insert_portfolio_snapshot, insert_reconciliation_report
+from live.db import build_engine, insert_portfolio_snapshot, insert_reconciliation_report, make_session_factory
 from live.monitor import Monitor
 
 
@@ -68,8 +66,9 @@ async def run_daily_reconciliation(
 
     # Persist to DB
     engine = build_engine(settings)
+    session_factory = make_session_factory(engine)
     try:
-        async with AsyncSession(engine) as session:
+        async with session_factory() as session:
             async with session.begin():
                 await insert_reconciliation_report(session, report)
     except Exception as exc:
@@ -105,9 +104,10 @@ async def run_daily_performance_report(
     logger.info("Running daily performance report.")
 
     engine = build_engine(settings)
+    session_factory = make_session_factory(engine)
     try:
         from live.db import get_recent_snapshots
-        async with AsyncSession(engine) as session:
+        async with session_factory() as session:
             snapshots = await get_recent_snapshots(session, mode="live", limit=200)
     except Exception as exc:
         logger.error("Failed to fetch snapshots for report: {error}", error=exc)
@@ -162,8 +162,9 @@ async def run_portfolio_snapshot(
     )
 
     engine = build_engine(settings)
+    session_factory = make_session_factory(engine)
     try:
-        async with AsyncSession(engine) as session:
+        async with session_factory() as session:
             async with session.begin():
                 await insert_portfolio_snapshot(session, snapshot, mode=settings.bot_mode)
     except Exception as exc:

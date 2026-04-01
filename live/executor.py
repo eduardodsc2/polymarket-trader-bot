@@ -30,10 +30,10 @@ from collections.abc import Callable
 from typing import Any
 
 from loguru import logger
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backtest.fill_model import FillModel
-from live.db import insert_live_order, insert_trade
+from live.db import insert_live_order, insert_trade, make_session_factory
 from config.schemas import OrderFill, OrderRequest, PortfolioState
 from config.settings import Settings
 from live.circuit_breaker import CircuitBreaker, CircuitState
@@ -64,11 +64,14 @@ class PaperExecutor:
         risk_manager: RiskManager,
         fill_model: FillModel,
         on_fill: FillCallback | None = None,
+        engine: Any | None = None,
     ) -> None:
         self._settings     = settings
         self._risk_manager = risk_manager
         self._fill_model   = fill_model
         self._on_fill      = on_fill
+        self._engine       = engine
+        self._session_factory = make_session_factory(engine) if engine is not None else None
         self._breaker      = CircuitBreaker(
             failure_threshold=settings.circuit_breaker_failure_threshold,
             cooldown_seconds=settings.circuit_breaker_cooldown_seconds,
@@ -169,6 +172,20 @@ class PaperExecutor:
             slip=fill.slippage_bps,
         )
 
+        if self._session_factory is not None:
+            try:
+                async with self._session_factory() as session:
+                    await insert_trade(
+                        session,
+                        fill,
+                        strategy=request.strategy,
+                        condition_id=request.condition_id,
+                        mode="paper",
+                    )
+                    await session.commit()
+            except Exception as exc:
+                logger.error("DB persistence error (paper fill not lost): {error}", error=exc)
+
         if self._on_fill is not None:
             try:
                 result_cb = self._on_fill(fill)
@@ -256,6 +273,7 @@ class LiveExecutor:
             failure_threshold=settings.circuit_breaker_failure_threshold,
             cooldown_seconds=settings.circuit_breaker_cooldown_seconds,
         )
+        self._session_factory = make_session_factory(engine)
         self._clob: Any | None = None   # ClobClient — initialised lazily
         self.trades: list[OrderFill] = []
 
@@ -452,7 +470,7 @@ class LiveExecutor:
         clob_order_id: str,
     ) -> None:
         order_type = "LIMIT" if request.limit_price is not None else "MARKET"
-        async with AsyncSession(self._engine) as session:
+        async with self._session_factory() as session:
             async with session.begin():
                 await insert_live_order(
                     session, fill,
@@ -473,22 +491,9 @@ class LiveExecutor:
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 async def _run_paper_mode(settings: Settings) -> None:
-    """Demo paper trading loop — prints status every 10s until interrupted."""
-    risk = RiskManager(settings, initial_capital=settings.initial_capital_usd)
-    fill = FillModel(slippage_bps=10)
-    executor = PaperExecutor(settings=settings, risk_manager=risk, fill_model=fill)
-
-    logger.info("Paper mode started. Waiting for market data...")
-    try:
-        while True:
-            await asyncio.sleep(10)
-            logger.info(
-                "Paper executor alive | fills={n} | circuit={state}",
-                n=len(executor.trades),
-                state=executor.circuit_state.value,
-            )
-    except asyncio.CancelledError:
-        logger.info("Paper executor shutting down.")
+    """Paper trading loop — fetches live markets and runs strategy via DataStream."""
+    from live.trading_loop import run_paper_loop
+    await run_paper_loop(settings)
 
 
 def main(mode: str = "paper") -> None:

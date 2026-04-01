@@ -210,18 +210,19 @@ def _daily_returns_from_equity(equity: list[float]) -> list[float]:
 
 def _trade_pnls(trades: list[Trade]) -> list[float]:
     """
-    Approximate per-trade PnL as: (sell_price - buy_price) * size / buy_price.
+    Per-trade PnL for closed positions only (SELL side).
 
-    This is a rough estimate since we don't track entry/exit pairs directly —
-    the portfolio does. For win_rate and profit_factor, BUY trades are excluded
-    (we can only judge closed trades). For the backtest report, use portfolio.realized_pnl.
+    For MarketMaker (explicit SELL): net_proceeds = size_usd - fee_usd.
+    For resolution-based strategies (CalibBetting, SumToOneArb): the portfolio
+    emits a synthetic SELL Trade at fill_price=1.0 (win) or fill_price=0.0 (loss).
+    PnL = size_usd - fee_usd: positive for wins (payout > 0), zero for losses.
+
+    BUY trades are excluded — they have no realized PnL on their own.
     """
     pnls: list[float] = []
     for t in trades:
         if t.side == "SELL":
-            # SELL proceeds minus estimated cost basis proxy
             pnls.append(t.size_usd - t.fee_usd)
-        # BUY trades don't have a realised PnL on their own
     return pnls
 
 

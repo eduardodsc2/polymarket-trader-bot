@@ -38,10 +38,23 @@ class GammaFetcher:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def get_active_markets(self, min_volume: float = 10_000.0) -> list[Market]:
-        """Fetch all currently active (unresolved) markets above min_volume."""
-        logger.info("Fetching active markets (min_volume={})", min_volume)
-        markets = self._fetch_all_pages(closed=False)
+    def get_active_markets(
+        self,
+        min_volume: float = 10_000.0,
+        max_markets: int = 2_000,
+    ) -> list[Market]:
+        """Fetch active (unresolved) markets above min_volume.
+
+        Args:
+            min_volume:  Client-side volume filter in USD.
+            max_markets: Hard pagination cap to avoid fetching the entire
+                         10k+ active-market catalogue (default 2 000).
+        """
+        logger.info("Fetching active markets (min_volume={}, cap={})", min_volume, max_markets)
+        extra: dict[str, Any] = {}
+        if min_volume > 0:
+            extra["volume_num_min"] = min_volume
+        markets = self._fetch_all_pages(closed=False, extra_params=extra or None, max_markets=max_markets)
         filtered = [m for m in markets if (m.volume_usd or 0) >= min_volume]
         logger.info("Active markets fetched: {} total, {} above min_volume", len(markets), len(filtered))
         return filtered

@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     # ── Bot config ────────────────────────────────────────────────────────────
     bot_mode: str = "paper"               # paper | live
+    paper_strategy: str = "market_maker"  # market_maker | sum_to_one_arb | calibration_betting
     initial_capital_usd: float = 500.0
 
     # ── Reproducibility ───────────────────────────────────────────────────────

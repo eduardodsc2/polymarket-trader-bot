@@ -111,7 +111,14 @@ class RiskManager:
     def _check_max_position_size(
         self, signal: TradeSignal, portfolio: PortfolioState, total_value: float
     ) -> RiskCheckResult:
-        """Rule 1 — Max single position ≤ max_position_pct of total capital."""
+        """Rule 1 — Max single position ≤ max_position_pct of total capital.
+
+        sum_to_one_arb is exempt: holding both YES and NO tokens simultaneously
+        is risk-free (one side always pays $1 at resolution), so directional
+        position-size limits do not apply.
+        """
+        if signal.strategy == "sum_to_one_arb":
+            return RiskCheckResult(approved=True)
         max_allowed = total_value * self._s.circuit_breaker_max_position_pct
         if signal.suggested_size_usd > max_allowed:
             return RiskCheckResult(
@@ -130,7 +137,19 @@ class RiskManager:
     def _check_kelly_cap(
         self, signal: TradeSignal, portfolio: PortfolioState, total_value: float
     ) -> RiskCheckResult:
-        """Rule 2 — Never bet more than kelly_fraction * Kelly optimal."""
+        """Rule 2 — Never bet more than kelly_fraction * Kelly optimal.
+
+        sum_to_one_arb is exempt: Kelly criterion applies to probabilistic bets
+        on a single outcome. For risk-free arbitrage (both sides held simultaneously),
+        the mathematical edge is guaranteed — Kelly would return bet=100%, which is
+        unhelpful. Position sizing is handled by the strategy's max_position_usdc cap.
+        """
+        if signal.strategy in ("sum_to_one_arb", "market_maker"):
+            # Kelly criterion requires a probabilistic edge estimate.
+            # sum_to_one_arb: guaranteed profit — Kelly says bet everything (unhelpful).
+            # market_maker: spread capture, not a directional probability bet.
+            # Position sizing is handled by the strategy's order_size_usdc parameter.
+            return RiskCheckResult(approved=True)
         full_kelly = compute_kelly_fraction(
             p_win=signal.estimated_probability,
             odds=1.0 / signal.market_price if signal.market_price > 0 else 0.0,

@@ -144,6 +144,7 @@ class SumToOneArb(BaseStrategy):
                 size_usd=current_leg_usd,
                 limit_price=None,           # market order — fills at current price
                 timestamp=event.timestamp,
+                edge=edge,
             ),
         ]
 
@@ -158,6 +159,7 @@ class SumToOneArb(BaseStrategy):
                     size_usd=other_leg_usd,
                     limit_price=other_limit,    # limit — fills when price ≤ this
                     timestamp=event.timestamp,
+                    edge=edge,
                 )
             )
 
