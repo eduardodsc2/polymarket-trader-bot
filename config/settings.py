@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     llm_daily_spend_limit_usd: float = 1.00
+    llm_model: str = "claude-haiku-4-5-20251001"  # Haiku: 8x cheaper than Sonnet, sufficient for binary probability estimation
 
     # ── News ─────────────────────────────────────────────────────────────────
     newsapi_key: str = ""
@@ -35,11 +36,11 @@ class Settings(BaseSettings):
     # ── News pipeline (Phase 4) ───────────────────────────────────────────────
     news_lookback_hours: int = 48
     news_min_relevance_score: float = 0.35
-    news_max_articles_per_prompt: int = 5
+    news_max_articles_per_prompt: int = 3   # was 5 — fewer articles = fewer input tokens
     use_semantic_relevance: bool = False
 
     # ── LLM pipeline (Phase 4) ───────────────────────────────────────────────
-    llm_cache_ttl_hours: int = 6
+    llm_cache_ttl_hours: int = 12          # was 6 — stable markets don't change in 12h
     llm_min_volume_usd: float = 50_000.0
 
     # ── Database ─────────────────────────────────────────────────────────────

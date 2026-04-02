@@ -18,17 +18,20 @@ from llm.cache import LLMCache
 from llm.prompt_builder import build_prompt
 from llm.response_parser import parse_response, prompt_hash
 
-# Cost estimate per token for claude-sonnet-4-6 (USD)
-# Input: ~$3.00 / 1M tokens, Output: ~$15.00 / 1M tokens
-_COST_PER_INPUT_TOKEN  = 3.00 / 1_000_000
-_COST_PER_OUTPUT_TOKEN = 15.00 / 1_000_000
+# Cost per token by model (USD). Used only for daily spend tracking — not billed here.
+# Haiku 4.5:  input $0.80/1M, output $4.00/1M
+# Sonnet 4.6: input $3.00/1M, output $15.00/1M
+_MODEL_COSTS: dict[str, tuple[float, float]] = {
+    "claude-haiku-4-5-20251001": (0.80 / 1_000_000, 4.00 / 1_000_000),
+    "claude-sonnet-4-6":         (3.00 / 1_000_000, 15.00 / 1_000_000),
+    "claude-opus-4-6":           (15.00 / 1_000_000, 75.00 / 1_000_000),
+}
+_DEFAULT_COST = (3.00 / 1_000_000, 15.00 / 1_000_000)
 
 
-def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
-    return round(
-        input_tokens * _COST_PER_INPUT_TOKEN + output_tokens * _COST_PER_OUTPUT_TOKEN,
-        6,
-    )
+def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    cost_in, cost_out = _MODEL_COSTS.get(model, _DEFAULT_COST)
+    return round(input_tokens * cost_in + output_tokens * cost_out, 6)
 
 
 class LLMEstimator:
@@ -41,11 +44,11 @@ class LLMEstimator:
         self,
         cache: LLMCache | None = None,
         api_key: str = "",
-        model: str = "claude-sonnet-4-6",
+        model: str = "",
     ) -> None:
         self._cache = cache or LLMCache()
         self._api_key = api_key or settings.anthropic_api_key
-        self._model = model
+        self._model = model or settings.llm_model
         self._client = None  # lazy init
 
     def _get_client(self):
@@ -121,7 +124,7 @@ class LLMEstimator:
         )
 
         raw_text = response.content[0].text
-        cost = _estimate_cost(response.usage.input_tokens, response.usage.output_tokens)
+        cost = _estimate_cost(self._model, response.usage.input_tokens, response.usage.output_tokens)
 
         logger.debug(
             "LLMEstimator: API response received",
