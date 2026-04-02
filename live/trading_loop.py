@@ -255,31 +255,25 @@ def fetch_markets(
     Returns up to MAX_MARKETS markets sorted by volume descending.
     """
     fetcher = GammaFetcher()
-    markets = fetcher.get_active_markets(min_volume=min_volume)
+
+    if max_resolution_hours is not None:
+        # Short-window mode: fetch markets by end_date instead of volume.
+        # 15min markets have low per-market volume and won't appear in top-N by volume.
+        pool_horizon_hours = max_resolution_hours * 8
+        markets = fetcher.get_short_window_markets(max_hours=pool_horizon_hours)
+        logger.info(
+            "Short-window fetch | pool={p}h | {n} markets returned",
+            p=pool_horizon_hours,
+            n=len(markets),
+        )
+    else:
+        markets = fetcher.get_active_markets(min_volume=min_volume)
 
     # Only keep markets with both token IDs (needed for strategy and DataStream)
     tradeable = [
         m for m in markets
         if m.yes_token_id and m.no_token_id
     ]
-
-    # For short-window strategies, restrict pool to markets resolving soon
-    if max_resolution_hours is not None:
-        now = datetime.now(timezone.utc)
-        pool_horizon_hours = max_resolution_hours * 8
-        before_filter = len(tradeable)
-        tradeable = [
-            m for m in tradeable
-            if m.end_date is not None
-            and 0 < _hours_until(m.end_date, now) <= pool_horizon_hours
-        ]
-        logger.info(
-            "Resolution filter applied | window={w}h (pool={p}h) | {before} → {after} markets",
-            w=max_resolution_hours,
-            p=pool_horizon_hours,
-            before=before_filter,
-            after=len(tradeable),
-        )
 
     # Sort by volume descending, cap at MAX_MARKETS
     tradeable.sort(key=lambda m: m.volume_usd or 0.0, reverse=True)

@@ -59,6 +59,39 @@ class GammaFetcher:
         logger.info("Active markets fetched: {} total, {} above min_volume", len(markets), len(filtered))
         return filtered
 
+    def get_short_window_markets(
+        self,
+        max_hours: float = 2.0,
+        max_markets: int = 500,
+    ) -> list[Market]:
+        """Fetch active markets resolving within the next ``max_hours`` hours.
+
+        Skips volume filtering — short-window markets accumulate little volume
+        per market but are valid trade targets. Uses server-side end_date_max
+        to avoid paginating the full active catalogue.
+
+        Args:
+            max_hours:   Upper bound on hours to resolution (e.g. 2.0).
+            max_markets: Pagination cap (default 500).
+        """
+        now = datetime.now(timezone.utc)
+        end_max = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        # Add max_hours to now for the upper bound
+        from datetime import timedelta
+        end_max = (now + timedelta(hours=max_hours)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+        logger.info(
+            "Fetching short-window markets (resolving within {}h, end_max={})",
+            max_hours, end_max,
+        )
+        extra: dict[str, Any] = {
+            "end_date_min": now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "end_date_max": end_max,
+        }
+        markets = self._fetch_all_pages(closed=False, extra_params=extra, max_markets=max_markets)
+        logger.info("Short-window markets fetched: {} raw", len(markets))
+        return markets
+
     def get_resolved_markets(
         self,
         start_date: str,
