@@ -604,3 +604,85 @@ class TestStrategyIntegration:
             market_data={"cond_1": market},
         )
         assert results.metrics.final_capital > 10_000.0
+
+
+# ── ValueBetting._should_skip_news ───────────────────────────────────────────
+
+class TestValueBettingShouldSkipNews:
+    """Unit tests for the pure _should_skip_news() method."""
+
+    def _make_strategy(self, skip_hours: float = 0.5) -> "ValueBetting":
+        from unittest.mock import MagicMock
+        from strategies.value_betting import ValueBetting
+
+        market = Market(
+            condition_id="cond_1",
+            question="Will BTC be above 70k?",
+            yes_token_id="yes_tok",
+            no_token_id="no_tok",
+        )
+        return ValueBetting(
+            market_data={"cond_1": market},
+            llm_estimator=MagicMock(),
+            news_skip_below_hours=skip_hours,
+        )
+
+    def _event(self, ts: datetime) -> PriceUpdateEvent:
+        return PriceUpdateEvent(
+            timestamp=ts,
+            token_id="yes_tok",
+            price=0.60,
+            condition_id="cond_1",
+        )
+
+    def _market(self, end_date: datetime) -> Market:
+        return Market(
+            condition_id="cond_1",
+            question="Will BTC be above 70k?",
+            end_date=end_date,
+            yes_token_id="yes_tok",
+            no_token_id="no_tok",
+        )
+
+    def test_skip_when_market_resolves_in_10_minutes(self) -> None:
+        """Market resolving in 10min (< 0.5h threshold) → news skipped."""
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+        strategy = self._make_strategy(skip_hours=0.5)
+        market = self._market(end_date=now + timedelta(minutes=10))
+        assert strategy._should_skip_news(market, self._event(now)) is True
+
+    def test_skip_when_market_resolves_in_15_minutes(self) -> None:
+        """15min crypto market (< 0.5h threshold) → news skipped."""
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+        strategy = self._make_strategy(skip_hours=0.5)
+        market = self._market(end_date=now + timedelta(minutes=15))
+        assert strategy._should_skip_news(market, self._event(now)) is True
+
+    def test_no_skip_when_market_resolves_in_2_hours(self) -> None:
+        """Market resolving in 2h (> 0.5h threshold) → news fetched."""
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+        strategy = self._make_strategy(skip_hours=0.5)
+        market = self._market(end_date=now + timedelta(hours=2))
+        assert strategy._should_skip_news(market, self._event(now)) is False
+
+    def test_no_skip_when_end_date_is_none(self) -> None:
+        """No end_date → can't compute hours → never skip (safe default)."""
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+        strategy = self._make_strategy(skip_hours=0.5)
+        market = self._market(end_date=None)  # type: ignore[arg-type]
+        market = market.model_copy(update={"end_date": None})
+        assert strategy._should_skip_news(market, self._event(now)) is False
+
+    def test_custom_threshold_respected(self) -> None:
+        """skip_hours=2.0 → a 90min market should also skip."""
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+        strategy = self._make_strategy(skip_hours=2.0)
+        market = self._market(end_date=now + timedelta(minutes=90))
+        assert strategy._should_skip_news(market, self._event(now)) is True
+
+    def test_boundary_exactly_at_threshold_does_not_skip(self) -> None:
+        """Market resolving in exactly 0.5h (= threshold) → not skipped."""
+        now = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+        strategy = self._make_strategy(skip_hours=0.5)
+        market = self._market(end_date=now + timedelta(minutes=30))
+        assert strategy._should_skip_news(market, self._event(now)) is False

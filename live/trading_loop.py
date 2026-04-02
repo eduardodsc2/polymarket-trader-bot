@@ -327,8 +327,14 @@ async def run_paper_loop(settings: Settings) -> None:
                 min_edge=settings.min_edge_pct,
                 kelly_fraction=settings.kelly_fraction,
                 max_position_usdc=settings.initial_capital_usd * 0.10,
+                news_skip_below_hours=settings.llm_news_skip_below_hours,
+                max_resolution_hours=settings.llm_max_resolution_hours,
             )
-            logger.info("Paper strategy: value_betting (LLM+Kelly)")
+            logger.info(
+                "Paper strategy: value_betting (LLM+Kelly) | news_skip_below={skip}h | max_resolution={res}h",
+                skip=settings.llm_news_skip_below_hours,
+                res=settings.llm_max_resolution_hours,
+            )
         else:
             strategy = MarketMaker(market_data=market_data, order_size_usdc=20.0)
             logger.info("Paper strategy: market_maker")

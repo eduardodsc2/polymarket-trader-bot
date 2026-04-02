@@ -543,6 +543,90 @@ def reconcile_onchain_balance(wallet_address: str) -> ReconciliationReport:
 
 ## Current Phase
 
-**PHASE 0 — Docker & Infrastructure**
+**PHASE 7 — Paper Trading & Strategy Validation** *(started 2026-04-01)*
 
-See `PLAN.md` for the full phased roadmap.
+All infrastructure phases (0–6) are complete. The system is deployed on a VPS and running paper trading to validate strategies before live capital.
+
+---
+
+### Phases Completed
+
+| Phase | Description | Status |
+|---|---|---|
+| 0 | Docker & Infrastructure | ✅ Done |
+| 1 | Data pipeline (Gamma + CLOB fetchers, PostgreSQL, 44 tests) | ✅ Done |
+| 2 | News pipeline (RSS, NewsAPI, Reddit, VADER sentiment, LunarCrush) | ✅ Done |
+| 3 | Backtest engine + 3 strategies (SumToOneArb, MarketMaker, CalibBetting), 140 tests, real 2024 data | ✅ Done |
+| 4 | LLM integration (Claude Haiku estimator, prompt builder, cache, calibration) | ✅ Done |
+| 5 | Paper trading infra (circuit breaker, risk manager, FastAPI dashboard, PaperExecutor, 305 tests) | ✅ Done |
+| 6 | Live trading layer (LiveExecutor via py-clob-client, Blockscout reconciliation, Telegram alerts, 329 tests) | ✅ Done |
+
+---
+
+### Phase 7 — Paper Trading Rotation Plan
+
+Each strategy runs 24h+ on real Polymarket data (paper mode, $500 virtual capital, VPS).
+
+| Step | Strategy | Status | Result |
+|---|---|---|---|
+| 2a | MarketMaker | ✅ Done (2026-04-01) | +0.26% in 24h, 96 stuck positions — **discarded** |
+| 2b | SumToOneArb | ⏳ Running since 2026-04-01 ~18:00 UTC | deployed $500 into YES+NO pairs immediately |
+| 2c | CalibrationBetting | ⏳ Auto-starts 2026-04-03 06:10 UTC (cron) | — |
+| 2d | ValueBetting (LLM+Kelly) | ⏳ Auto-starts 2026-04-04 06:10 UTC (cron) | — |
+
+**After all strategies tested:** parameter optimization (Step 5) → live approval criteria check (Step 6).
+
+---
+
+### Live Approval Criteria (all must pass)
+
+- Sharpe Ratio ≥ 0.5
+- Max Drawdown ≤ 20%
+- Win Rate ≥ 45%
+- Paper trading ≥ 7 days
+- 0 circuit breaker trips
+- Backtest vs paper divergence ≤ 20%
+
+---
+
+### Production Environment
+
+- **VPS**: `root@129.121.53.10` (port 22022)
+- **Deploy dir**: `/opt/polymarket-trader-bot`
+- **Dashboard**: `http://129.121.53.10:8080` (FastAPI + WebSocket, polls PostgreSQL every 5s)
+- **DB**: PostgreSQL on `129.121.53.10:5432`, user=`polymarket`, db=`polymarket_bot`
+- **Strategy rotation**: `scripts/switch_strategy.sh <strategy>` — updates `.env` + runs `docker compose up -d`
+- **Cron**: `/etc/cron.d/polymarket` on VPS — auto-rotates strategies on schedule
+- **Bot mode**: `BOT_MODE=paper`, `INITIAL_CAPITAL_USD=500`
+- **Active strategy**: controlled by `PAPER_STRATEGY` in `.env` (market_maker | sum_to_one_arb | calibration_betting | value_betting)
+
+---
+
+### Key Decisions Made
+
+- **MarketMaker discarded**: Polymarket CLOB does not match passive limit orders from external bots — orders don't fill, creating stuck inventory. Not suitable.
+- **LLM cost optimization**: Using `claude-haiku-4-5-20251001` (8x cheaper than Sonnet), TTL cache 12h, max 3 articles per prompt. Est. cost ~$0.10/day.
+- **SumToOneArb behavior**: Deploys all capital immediately into YES+NO pairs (cash → $0 is expected and correct).
+- **Synthetic SELL trades**: `backtest/portfolio.py` emits synthetic SELL on token resolution/expiry so win_rate tracking works for non-MarketMaker strategies.
+- **`docker compose up -d` vs `restart`**: `restart` does NOT re-read `.env` variable substitution. Always use `up -d` after `.env` changes.
+
+---
+
+### Running Commands (VPS)
+
+```bash
+# SSH into VPS
+ssh -p 22022 root@129.121.53.10
+
+# Check bot status
+docker compose logs -f bot
+
+# Switch strategy manually
+bash scripts/switch_strategy.sh sum_to_one_arb
+
+# Generate paper trading report
+docker compose run --rm bot python scripts/paper_report.py --strategy sum_to_one_arb
+
+# DB shell
+docker compose exec db psql -U polymarket -d polymarket_bot
+```

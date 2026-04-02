@@ -60,6 +60,8 @@ class ValueBetting(BaseStrategy):
         max_position_usdc: float = 300.0,
         min_volume_usd: float | None = None,
         max_days_to_resolution: int = 90,
+        news_skip_below_hours: float | None = None,
+        max_resolution_hours: float | None = None,
     ) -> None:
         self._market_data = market_data
         self._llm_estimator = llm_estimator
@@ -73,6 +75,16 @@ class ValueBetting(BaseStrategy):
             min_volume_usd if min_volume_usd is not None else settings.llm_min_volume_usd
         )
         self._max_days_to_resolution = max_days_to_resolution
+        self._news_skip_below_hours = (
+            news_skip_below_hours
+            if news_skip_below_hours is not None
+            else settings.llm_news_skip_below_hours
+        )
+        self._max_resolution_hours = (
+            max_resolution_hours
+            if max_resolution_hours is not None
+            else settings.llm_max_resolution_hours
+        )
 
         # Build token → condition_id lookup
         self._token_to_condition: dict[str, str] = {}
@@ -119,8 +131,8 @@ class ValueBetting(BaseStrategy):
                 if market.end_date.tzinfo
                 else market.end_date.replace(tzinfo=timezone.utc)
             )
-            days_left = (end_dt - event.timestamp).total_seconds() / 86_400
-            if days_left > self._max_days_to_resolution or days_left < 0:
+            hours_left = (end_dt - event.timestamp).total_seconds() / 3600
+            if hours_left < 0 or hours_left > self._max_resolution_hours:
                 return []
 
         # Get (or fetch) LLM estimate
@@ -197,12 +209,30 @@ class ValueBetting(BaseStrategy):
 
     # ── Private helpers ──────────────────────────────────────────────────────
 
+    def _should_skip_news(self, market: Market, event: PriceUpdateEvent) -> bool:
+        """Pure function — returns True if the market resolves too soon for news to be useful."""
+        if market.end_date is None:
+            return False
+        end_dt = (
+            market.end_date
+            if market.end_date.tzinfo
+            else market.end_date.replace(tzinfo=timezone.utc)
+        )
+        hours_to_close = (end_dt - event.timestamp).total_seconds() / 3600
+        return hours_to_close < self._news_skip_below_hours
+
     def _fetch_estimate(
         self, market: Market, event: PriceUpdateEvent
     ) -> LLMEstimate:
-        """Fetch news (if fetcher provided) then call the LLM estimator."""
+        """Fetch news (if fetcher provided) then call the LLM estimator.
+
+        News is skipped when the market resolves in less than
+        ``_news_skip_below_hours`` hours: no articles published in that window
+        can be relevant, and skipping saves ~75% of input tokens.
+        """
         articles: list = []
-        if self._news_fetcher is not None:
+        skip_news = self._should_skip_news(market, event)
+        if self._news_fetcher is not None and not skip_news:
             try:
                 articles = self._news_fetcher.fetch_for_market_at(
                     question=market.question,
@@ -214,6 +244,12 @@ class ValueBetting(BaseStrategy):
                     "ValueBetting: news fetch failed — proceeding without context",
                     error=str(exc),
                 )
+        elif skip_news:
+            logger.debug(
+                "ValueBetting: news skipped (short-window market)",
+                condition_id=market.condition_id,
+                news_skip_below_hours=self._news_skip_below_hours,
+            )
 
         resolution_date = (
             market.end_date.strftime("%Y-%m-%d")
