@@ -317,6 +317,18 @@ async def run_paper_loop(settings: Settings) -> None:
             from strategies.calibration_betting import CalibrationBetting
             strategy = CalibrationBetting(market_data=market_data)
             logger.info("Paper strategy: calibration_betting")
+        elif paper_strat == "value_betting":
+            from strategies.value_betting import ValueBetting
+            from llm.estimator import LLMEstimator
+            llm_estimator = LLMEstimator(settings=settings)
+            strategy = ValueBetting(
+                market_data=market_data,
+                llm_estimator=llm_estimator,
+                min_edge=settings.min_edge_pct,
+                kelly_fraction=settings.kelly_fraction,
+                max_position_usdc=settings.initial_capital_usd * 0.10,
+            )
+            logger.info("Paper strategy: value_betting (LLM+Kelly)")
         else:
             strategy = MarketMaker(market_data=market_data, order_size_usdc=20.0)
             logger.info("Paper strategy: market_maker")
