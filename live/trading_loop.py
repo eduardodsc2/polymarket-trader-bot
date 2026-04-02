@@ -320,7 +320,7 @@ async def run_paper_loop(settings: Settings) -> None:
         elif paper_strat == "value_betting":
             from strategies.value_betting import ValueBetting
             from llm.estimator import LLMEstimator
-            llm_estimator = LLMEstimator(settings=settings)
+            llm_estimator = LLMEstimator(api_key=settings.anthropic_api_key, model=settings.llm_model)
             strategy = ValueBetting(
                 market_data=market_data,
                 llm_estimator=llm_estimator,
