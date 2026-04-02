@@ -121,6 +121,65 @@ class Alerter:
             f"Strategy: {strategy}"
         )
 
+    async def alert_session_start(
+        self, strategy: str, capital: float, markets: int
+    ) -> None:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        await self.send(
+            f"🟢 BOT INICIADO\n"
+            f"Estratégia: {strategy}\n"
+            f"Capital: ${capital:,.2f}\n"
+            f"Mercados: {markets}\n"
+            f"Hora: {ts}"
+        )
+
+    async def alert_fill(
+        self,
+        strategy: str,
+        side: str,
+        size_usd: float,
+        price: float,
+        condition_id: str,
+        total_fills: int,
+    ) -> None:
+        emoji = "🟢" if side == "BUY" else "🔵"
+        ts = datetime.now(timezone.utc).strftime("%H:%M UTC")
+        await self.send(
+            f"{emoji} FILL #{total_fills}\n"
+            f"Estratégia: {strategy}\n"
+            f"Lado: {side}  |  Tamanho: ${size_usd:.2f}\n"
+            f"Preço: {price:.4f}\n"
+            f"Mercado: {condition_id[:20]}…\n"
+            f"Hora: {ts}"
+        )
+
+    async def alert_portfolio_report(
+        self,
+        strategy: str,
+        total_value: float,
+        cash: float,
+        positions_value: float,
+        realized_pnl: float,
+        initial_capital: float,
+        total_fills: int,
+        ticks: int,
+        circuit_state: str,
+    ) -> None:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        pnl_pct = (realized_pnl / initial_capital * 100) if initial_capital else 0.0
+        pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
+        await self.send(
+            f"📊 RELATÓRIO — {strategy}\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"Portfólio: ${total_value:,.2f}\n"
+            f"  Cash: ${cash:,.2f}\n"
+            f"  Posições: ${positions_value:,.2f}\n"
+            f"{pnl_emoji} PnL Realizado: ${realized_pnl:+,.2f} ({pnl_pct:+.2f}%)\n"
+            f"Fills: {total_fills}  |  Ticks: {ticks:,}\n"
+            f"Circuit: {'🟢' if circuit_state == 'closed' else '🔴'} {circuit_state.upper()}\n"
+            f"⏱ {ts}"
+        )
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _post(self, text: str) -> None:

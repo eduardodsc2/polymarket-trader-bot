@@ -27,6 +27,7 @@ from backtest.fill_model import FillModel
 from config.schemas import Market, OrderFill, PortfolioSnapshot, PortfolioState
 from config.settings import Settings
 from data.fetchers.gamma_fetcher import GammaFetcher
+from live.alerting import Alerter
 from live.circuit_breaker import CircuitBreaker
 from live.data_stream import DataStream
 from live.db import build_engine, insert_portfolio_snapshot, make_session_factory
@@ -64,6 +65,9 @@ class TradingLoop:
         self._executor = executor
         self._session_factory = session_factory
         self._mode = mode
+        self._alerter = Alerter(settings)
+        self._report_interval = settings.telegram_report_interval_minutes * 60
+        self._last_report_ts: float = 0.0
 
         # Build token_id → Market lookup
         self._token_to_market: dict[str, Market] = {}
@@ -105,6 +109,13 @@ class TradingLoop:
         )
 
         self._strategy.on_start()
+
+        import asyncio as _asyncio
+        _asyncio.create_task(self._alerter.alert_session_start(
+            strategy=self._strategy.name,
+            capital=self._settings.initial_capital_usd,
+            markets=len({m.condition_id for m in self._token_to_market.values()}),
+        ))
 
         stream = DataStream(
             token_ids=self._token_ids,
@@ -175,6 +186,15 @@ class TradingLoop:
             if fill is not None:
                 self._apply_fill(fill, order.side, order.token_id)
                 self._fills.append(fill)
+                import asyncio as _asyncio
+                _asyncio.create_task(self._alerter.alert_fill(
+                    strategy=self._strategy.name,
+                    side=order.side,
+                    size_usd=fill.filled_size_usd,
+                    price=fill.fill_price,
+                    condition_id=order.condition_id,
+                    total_fills=len(self._fills),
+                ))
 
     def _apply_fill(self, fill: OrderFill, side: str, token_id: str) -> None:
         """Update portfolio cash and position tracking after a fill."""
@@ -195,7 +215,8 @@ class TradingLoop:
         )
 
     async def _periodic_log(self) -> None:
-        """Log portfolio status and persist snapshot every LOG_INTERVAL_SECONDS."""
+        """Log portfolio status, persist snapshot, and send Telegram report periodically."""
+        import time
         while not self._stop_event.is_set():
             await asyncio.sleep(LOG_INTERVAL_SECONDS)
             snapshot = _portfolio_to_snapshot(self._portfolio, self._positions_value_usd)
@@ -213,6 +234,22 @@ class TradingLoop:
                         await session.commit()
                 except Exception as exc:
                     logger.error("DB snapshot persistence error: {error}", error=exc)
+
+            # Periodic Telegram report
+            now_ts = time.monotonic()
+            if now_ts - self._last_report_ts >= self._report_interval:
+                self._last_report_ts = now_ts
+                await self._alerter.alert_portfolio_report(
+                    strategy=self._strategy.name,
+                    total_value=snapshot.total_value_usd,
+                    cash=snapshot.cash_usd,
+                    positions_value=snapshot.positions_value_usd,
+                    realized_pnl=snapshot.realized_pnl,
+                    initial_capital=self._settings.initial_capital_usd,
+                    total_fills=len(self._fills),
+                    ticks=self._tick_count,
+                    circuit_state=self._executor.circuit_state.value,
+                )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

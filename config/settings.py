@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str   = ""
     daily_pnl_alert_threshold: float = 0.02  # alert if day PnL drops > 2%
+    telegram_report_interval_minutes: int = 30  # periodic portfolio report cadence
 
     # ── Risk rules ────────────────────────────────────────────────────────────
     min_market_volume_usd: float = 10_000.0
