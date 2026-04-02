@@ -21,8 +21,8 @@ else
     echo "PAPER_STRATEGY=$STRATEGY" >> "$DEPLOY_DIR/.env"
 fi
 
-# Reinicia o bot
+# Reinicia bot e dashboard (up -d re-lê .env, restart não)
 cd "$DEPLOY_DIR"
-docker compose restart bot >> "$LOG" 2>&1
+docker compose up -d bot dashboard >> "$LOG" 2>&1
 
-echo "[$(date -u)] Bot reiniciado com estrategia: $STRATEGY" >> "$LOG"
+echo "[$(date -u)] Bot e dashboard reiniciados com estrategia: $STRATEGY" >> "$LOG"
