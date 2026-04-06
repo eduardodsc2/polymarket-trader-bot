@@ -9,7 +9,7 @@ on_price_update(token_id, price) for each tick received.
 
 Features:
   - Automatic reconnect with exponential back-off (cap: 60s)
-  - Ping/keepalive to detect silent disconnects
+  - Watchdog task: forces reconnect if no tick received in ws_stall_timeout_seconds
   - Clean shutdown via asyncio.Event
 
 Usage:
@@ -55,6 +55,7 @@ class DataStream:
         self._settings        = settings
         self._stop_event      = asyncio.Event()
         self._connected       = False
+        self._last_tick_at: float = time.monotonic()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -63,11 +64,16 @@ class DataStream:
         Connect and stream until stop() is called.
 
         Uses the modern websockets.asyncio.client.connect() async-iterator API
-        which handles exponential back-off reconnect automatically. On each
-        ConnectionClosed we just `continue` to restart the outer loop.
+        which handles exponential back-off reconnect automatically.
+
+        For each connection, runs two concurrent tasks via TaskGroup:
+          - _read_loop: receives messages and dispatches price updates
+          - _watchdog:  closes the socket if no tick arrives in stall_timeout seconds
+
+        When either task ends (watchdog fires or read loop ends), TaskGroup
+        cancels the other and the outer loop reconnects.
         """
         from websockets.asyncio.client import connect
-        from websockets.exceptions import ConnectionClosed, ConnectionClosedOK
 
         url = self._settings.clob_ws_url
         logger.info("Connecting to CLOB WebSocket: {url}", url=url)
@@ -78,36 +84,33 @@ class DataStream:
                 ping_interval=self._settings.ws_ping_interval_seconds,
                 ping_timeout=self._settings.ws_ping_interval_seconds,
             ):
+                if self._stop_event.is_set():
+                    break
+
+                self._connected = True
+                self._last_tick_at = time.monotonic()
+                logger.info(
+                    "WebSocket connected. Subscribing to {n} token(s).",
+                    n=len(self._token_ids),
+                )
+                await self._subscribe(ws)
+
                 try:
-                    self._connected = True
-                    logger.info(
-                        "WebSocket connected. Subscribing to {n} token(s).",
-                        n=len(self._token_ids),
-                    )
-                    await self._subscribe(ws)
-
-                    async for raw in ws:
-                        if self._stop_event.is_set():
-                            return
-                        await self._handle_message(raw)
-
-                except ConnectionClosedOK:
-                    self._connected = False
-                    if self._stop_event.is_set():
-                        break           # intentional shutdown
-                    logger.debug("WebSocket closed cleanly — reconnecting.")
-                    continue
-
-                except ConnectionClosed as exc:
-                    self._connected = False
-                    logger.warning(
-                        "WebSocket connection lost: {error} — reconnecting.",
-                        error=exc,
-                    )
-                    continue
-
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(self._read_loop(ws))
+                        tg.create_task(self._watchdog(ws))
+                except* asyncio.CancelledError:
+                    pass
+                except* Exception as eg:
+                    for exc in eg.exceptions:
+                        logger.warning("WebSocket task error: {e}", e=exc)
                 finally:
                     self._connected = False
+
+                if self._stop_event.is_set():
+                    break
+
+                logger.debug("WebSocket loop ended — reconnecting.")
 
         except asyncio.CancelledError:
             pass
@@ -123,6 +126,35 @@ class DataStream:
         return self._connected
 
     # ── Internal ──────────────────────────────────────────────────────────────
+
+    async def _read_loop(self, ws: Any) -> None:
+        """Receive messages from the WebSocket and dispatch price updates."""
+        from websockets.exceptions import ConnectionClosed, ConnectionClosedOK
+        try:
+            async for raw in ws:
+                if self._stop_event.is_set():
+                    return
+                self._last_tick_at = time.monotonic()
+                await self._handle_message(raw)
+        except ConnectionClosedOK:
+            if not self._stop_event.is_set():
+                logger.debug("WebSocket closed cleanly — reconnecting.")
+        except ConnectionClosed as exc:
+            logger.warning("WebSocket connection lost: {e} — reconnecting.", e=exc)
+
+    async def _watchdog(self, ws: Any) -> None:
+        """Close the WebSocket if no tick received within stall_timeout seconds."""
+        timeout = self._settings.ws_stall_timeout_seconds
+        while not self._stop_event.is_set():
+            await asyncio.sleep(30)
+            elapsed = time.monotonic() - self._last_tick_at
+            if elapsed > timeout:
+                logger.warning(
+                    "WebSocket stall detected ({elapsed:.0f}s without tick) — forcing reconnect.",
+                    elapsed=elapsed,
+                )
+                await ws.close()
+                return
 
     async def _subscribe(self, ws: Any) -> None:
         """Send subscription message for all tracked token IDs.
@@ -164,7 +196,6 @@ class DataStream:
         if isinstance(data, list):
             for book in data:
                 token_id = book.get("asset_id")
-                # Derive mid price from best bid/ask if available
                 bids = book.get("bids", [])
                 asks = book.get("asks", [])
                 price = None
@@ -189,7 +220,6 @@ class DataStream:
                 token_id = change.get("asset_id")
                 price_str = change.get("price")
                 if not price_str:
-                    # Fall back to mid of best_bid/best_ask
                     bid = change.get("best_bid")
                     ask = change.get("best_ask")
                     if bid and ask:

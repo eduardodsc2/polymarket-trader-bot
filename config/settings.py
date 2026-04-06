@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     clob_ws_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
     ws_reconnect_delay_seconds: float = 5.0
     ws_ping_interval_seconds: float = 30.0
+    ws_stall_timeout_seconds: float = 90.0  # reconecta se nenhum tick em 90s
 
     # ── Dashboard ─────────────────────────────────────────────────────────────
     dashboard_db_url: str = "postgresql+asyncpg://polymarket:changeme@db:5432/polymarket_bot"
