@@ -364,9 +364,34 @@ async def run_paper_loop(settings: Settings) -> None:
             )
             logger.info("Paper strategy: sum_to_one_arb | max_pos=${max}", max=max_pos)
         elif paper_strat == "calibration_betting":
+            from datetime import datetime as _dt_cb, timezone as _tz_cb
             from strategies.calibration_betting import CalibrationBetting
-            strategy = CalibrationBetting(market_data=market_data)
-            logger.info("Paper strategy: calibration_betting")
+            _now_cb = _dt_cb.now(_tz_cb.utc)
+            _fetcher_cb = GammaFetcher()
+            _all_cb = _fetcher_cb.get_active_markets(min_volume=5_000.0, max_markets=2_000)
+            _cb_window: list[Market] = []
+            for _m in _all_cb:
+                if not (_m.yes_token_id and _m.no_token_id):
+                    continue
+                if _m.end_date is None:
+                    continue
+                _end = _m.end_date if _m.end_date.tzinfo else _m.end_date.replace(tzinfo=_tz_cb.utc)
+                _h = (_end - _now_cb).total_seconds() / 3600
+                if 24.0 <= _h <= 720.0:  # 1 day – 30 days
+                    _cb_window.append(_m)
+            _cb_window.sort(key=lambda _m: _m.volume_usd or 0, reverse=True)
+            _cb_markets = _cb_window[:MAX_MARKETS]
+            _cb_market_data = {m.condition_id: m for m in _cb_markets}
+            strategy = CalibrationBetting(
+                market_data=_cb_market_data,
+                min_hours_to_resolution=24.0,
+                max_days_to_resolution=30,
+            )
+            market_data = _cb_market_data
+            logger.info(
+                "Paper strategy: calibration_betting | eligible_markets={n} | window=24h–30d",
+                n=len(_cb_markets),
+            )
         elif paper_strat == "value_betting":
             # fetch_markets() caps at MAX_MARKETS=50 sorted by volume — those top-50 markets
             # resolve months/years out and are all filtered by hours_left before the LLM runs.

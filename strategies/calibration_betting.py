@@ -64,7 +64,9 @@ class CalibrationBetting(BaseStrategy):
         min_edge:             Minimum |base_rate - price| required to trade (default 5%).
         kelly_fraction:       Fraction of full Kelly to use (default 0.25 = quarter-Kelly).
         max_position_usdc:    Maximum USD per trade (default $300).
-        max_days_to_resolution: Skip markets resolving beyond this horizon (default 90 days).
+        max_days_to_resolution: Skip markets resolving beyond this horizon (default 30 days).
+        min_hours_to_resolution: Skip markets resolving sooner than this (default 24h — avoids
+                                 already-decided markets where price reflects near-certain outcome).
     """
 
     name = "calibration_betting"
@@ -76,12 +78,14 @@ class CalibrationBetting(BaseStrategy):
         min_edge: float = 0.05,
         kelly_fraction: float = 0.25,
         max_position_usdc: float = 300.0,
-        max_days_to_resolution: int = 90,
+        max_days_to_resolution: int = 30,
+        min_hours_to_resolution: float = 24.0,
     ) -> None:
         self.min_edge = min_edge
         self.kelly_fraction = kelly_fraction
         self.max_position_usdc = max_position_usdc
         self.max_days_to_resolution = max_days_to_resolution
+        self.min_hours_to_resolution = min_hours_to_resolution
 
         # Merge caller-provided base rates on top of defaults
         self._base_rates: dict[str | None, float] = {**DEFAULT_BASE_RATES}
@@ -117,12 +121,14 @@ class CalibrationBetting(BaseStrategy):
         if cond_id in self._entered:
             return []  # already have a position
 
-        # Check days-to-resolution filter
+        # Check time-to-resolution window filter
         if market.end_date is not None:
             end_dt = market.end_date if market.end_date.tzinfo else market.end_date.replace(tzinfo=timezone.utc)
-            remaining = (end_dt - event.timestamp).total_seconds() / 86_400
-            if remaining > self.max_days_to_resolution:
-                return []  # market resolves too far in the future
+            remaining_hours = (end_dt - event.timestamp).total_seconds() / 3600
+            if remaining_hours < self.min_hours_to_resolution:
+                return []  # too close to resolution — price already near certainty
+            if remaining_hours > self.max_days_to_resolution * 24:
+                return []  # resolves too far out — base rate edge is weak
 
         # Look up base rate for this market's category
         category = (market.category or "").lower() if market.category else None
