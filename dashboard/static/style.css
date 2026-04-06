@@ -106,6 +106,74 @@ main { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
 #alerts-list li::before { content: "⚠ "; }
 .hidden { display: none !important; }
 
+/* ── Strategy cards ────────────────────────────────────────────────────────── */
+#strategies-section { }
+#strategies-section > h2 { font-size: 0.85em; color: var(--muted); margin-bottom: 0.75rem; }
+
+#strategies-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.strategy-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem 0.75rem 1rem;
+  overflow: hidden;
+}
+
+.strategy-card-accent {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+}
+
+.strategy-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.6rem;
+}
+
+.strategy-name {
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.strategy-last-update {
+  font-size: 0.7em;
+  color: var(--muted);
+}
+
+.strategy-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.35rem 0.5rem;
+}
+
+.strategy-metric { }
+.sm-label { font-size: 0.65em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.sm-value { font-size: 0.95em; font-weight: 700; color: var(--text); }
+.sm-value.positive { color: var(--green); }
+.sm-value.negative { color: var(--red); }
+
+/* Mini strategy badge used in trades table */
+.badge-strategy-mini {
+  display: inline-block;
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
 /* ── Table ─────────────────────────────────────────────────────────────────── */
 section > h2 { font-size: 0.85em; color: var(--muted); margin-bottom: 0.75rem; }
 

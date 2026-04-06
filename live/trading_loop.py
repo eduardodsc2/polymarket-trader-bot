@@ -230,7 +230,11 @@ class TradingLoop:
             if self._session_factory is not None:
                 try:
                     async with self._session_factory() as session:
-                        await insert_portfolio_snapshot(session, snapshot, mode=self._mode)
+                        await insert_portfolio_snapshot(
+                            session, snapshot,
+                            mode=self._mode,
+                            strategy=self._strategy.name,
+                        )
                         await session.commit()
                 except Exception as exc:
                     logger.error("DB snapshot persistence error: {error}", error=exc)

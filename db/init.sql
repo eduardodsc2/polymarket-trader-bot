@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS live_orders (
 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
     id                  BIGSERIAL PRIMARY KEY,
     mode                TEXT NOT NULL CHECK (mode IN ('paper', 'live')),
+    strategy            TEXT NOT NULL DEFAULT 'unknown',
     cash_usd            NUMERIC NOT NULL,
     positions_value_usd NUMERIC NOT NULL,
     total_value_usd     NUMERIC NOT NULL,

@@ -160,19 +160,21 @@ async def insert_portfolio_snapshot(
     session: AsyncSession,
     snapshot: PortfolioSnapshot,
     mode: str = "live",
+    strategy: str = "unknown",
 ) -> None:
     """Persist a portfolio snapshot to build the equity curve."""
     await session.execute(
         text("""
             INSERT INTO portfolio_snapshots
-                (mode, cash_usd, positions_value_usd, total_value_usd,
+                (mode, strategy, cash_usd, positions_value_usd, total_value_usd,
                  unrealized_pnl, realized_pnl, open_positions, snapshot_at)
             VALUES
-                (:mode, :cash_usd, :positions_value_usd, :total_value_usd,
+                (:mode, :strategy, :cash_usd, :positions_value_usd, :total_value_usd,
                  :unrealized_pnl, :realized_pnl, :open_positions, :snapshot_at)
         """),
         {
             "mode":                mode,
+            "strategy":            strategy,
             "cash_usd":            snapshot.cash_usd,
             "positions_value_usd": snapshot.positions_value_usd,
             "total_value_usd":     snapshot.total_value_usd,

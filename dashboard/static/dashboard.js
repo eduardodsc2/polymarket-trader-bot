@@ -3,15 +3,30 @@
 const WS_URL = `ws://${location.host}/ws`;
 const RECONNECT_DELAY_MS = 3000;
 
-// Equity curve data (in-memory, capped at 200 points)
+// ── Strategy colour palette ───────────────────────────────────────────────────
+
+const STRATEGY_COLORS = {
+  value_betting:       '#58a6ff',   // blue
+  weather_betting:     '#3fb950',   // green
+  sum_to_one_arb:      '#d29922',   // yellow
+  calibration_betting: '#bc8cff',   // purple
+  market_maker:        '#f0883e',   // orange
+};
+
+function strategyColor(name) {
+  return STRATEGY_COLORS[name] || '#8b949e';
+}
+
+// ── Equity curve (multi-strategy) ────────────────────────────────────────────
+
 const MAX_EQUITY_POINTS = 200;
+// Shared x-axis labels (time ticks — updated on each snapshot)
 const equityLabels = [];
-const equityData   = [];
+// Per-strategy data arrays: { [strategy]: number[] }
+const equityDatasets = {};
 
-let ws   = null;
+let ws    = null;
 let chart = null;
-
-// ── Chart setup ──────────────────────────────────────────────────────────────
 
 function initChart() {
   const ctx = document.getElementById('equity-chart').getContext('2d');
@@ -19,22 +34,15 @@ function initChart() {
     type: 'line',
     data: {
       labels: equityLabels,
-      datasets: [{
-        label: 'Portfolio Value ($)',
-        data: equityData,
-        borderColor: '#58a6ff',
-        backgroundColor: 'rgba(88,166,255,0.08)',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        fill: true,
-        tension: 0.3,
-      }],
+      datasets: [],
     },
     options: {
       animation: false,
       responsive: true,
       maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: true, labels: { color: '#c9d1d9', font: { size: 11 } } },
+      },
       scales: {
         x: {
           ticks: { color: '#8b949e', maxTicksLimit: 8, font: { size: 10 } },
@@ -53,15 +61,111 @@ function initChart() {
   });
 }
 
-function pushEquityPoint(totalValue, timestamp) {
+function _getOrCreateDataset(strategy) {
+  const existing = chart.data.datasets.find(d => d.label === strategy);
+  if (existing) return existing;
+
+  const color = strategyColor(strategy);
+  const dataset = {
+    label: strategy,
+    data: [],
+    borderColor: color,
+    backgroundColor: color.replace(')', ', 0.07)').replace('rgb', 'rgba'),
+    borderWidth: 1.5,
+    pointRadius: 0,
+    fill: false,
+    tension: 0.3,
+  };
+  chart.data.datasets.push(dataset);
+  equityDatasets[strategy] = dataset.data;
+  return dataset;
+}
+
+function updateEquityChart(strategy, totalValue, timestamp) {
+  if (!chart) return;
   const label = new Date(timestamp).toLocaleTimeString();
-  if (equityLabels.length >= MAX_EQUITY_POINTS) {
-    equityLabels.shift();
-    equityData.shift();
+
+  // Add label if it's new (shared x-axis)
+  if (equityLabels.length === 0 || equityLabels[equityLabels.length - 1] !== label) {
+    if (equityLabels.length >= MAX_EQUITY_POINTS) equityLabels.shift();
+    equityLabels.push(label);
+
+    // Extend all existing datasets with null to keep lengths aligned
+    for (const ds of chart.data.datasets) {
+      if (ds.label !== strategy) {
+        if (ds.data.length >= MAX_EQUITY_POINTS) ds.data.shift();
+        ds.data.push(null);
+      }
+    }
   }
-  equityLabels.push(label);
-  equityData.push(totalValue);
+
+  const ds = _getOrCreateDataset(strategy);
+  if (ds.data.length >= MAX_EQUITY_POINTS) ds.data.shift();
+  ds.data.push(totalValue);
+
   chart.update('none');
+}
+
+// ── Strategy cards ────────────────────────────────────────────────────────────
+
+function renderStrategyCards(strategies) {
+  const grid = document.getElementById('strategies-grid');
+  if (!grid) return;
+
+  strategies.forEach(s => {
+    const id = 'strategy-card-' + s.strategy.replace(/[^a-z0-9]/g, '_');
+    let card = document.getElementById(id);
+
+    const color = strategyColor(s.strategy);
+    const pnl = s.realized_pnl ?? 0;
+    const pnlSign = pnl >= 0 ? '+$' : '-$';
+    const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+    const winRateTxt = s.win_rate != null ? (s.win_rate * 100).toFixed(1) + '%' : '—';
+    const lastSnap = s.last_snapshot_at
+      ? new Date(s.last_snapshot_at).toLocaleTimeString()
+      : '—';
+
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'strategy-card';
+      card.id = id;
+      grid.appendChild(card);
+    }
+
+    card.innerHTML = `
+      <div class="strategy-card-header">
+        <span class="strategy-name" style="color:${color}">${s.strategy}</span>
+        <span class="strategy-last-update">${lastSnap}</span>
+      </div>
+      <div class="strategy-metrics">
+        <div class="strategy-metric">
+          <div class="sm-label">Value</div>
+          <div class="sm-value">$${fmt(s.total_value_usd)}</div>
+        </div>
+        <div class="strategy-metric">
+          <div class="sm-label">Cash</div>
+          <div class="sm-value">$${fmt(s.cash_usd)}</div>
+        </div>
+        <div class="strategy-metric">
+          <div class="sm-label">PnL</div>
+          <div class="sm-value ${pnlClass}">${pnlSign}${fmt(Math.abs(pnl))}</div>
+        </div>
+        <div class="strategy-metric">
+          <div class="sm-label">Win Rate</div>
+          <div class="sm-value">${winRateTxt}</div>
+        </div>
+        <div class="strategy-metric">
+          <div class="sm-label">Trades</div>
+          <div class="sm-value">${s.total_trades ?? '—'}</div>
+        </div>
+        <div class="strategy-metric">
+          <div class="sm-label">Positions</div>
+          <div class="sm-value">${s.open_positions ?? '—'}</div>
+        </div>
+      </div>
+      <div class="strategy-card-accent" style="background:${color}"></div>
+    `;
+  });
 }
 
 // ── DOM helpers ──────────────────────────────────────────────────────────────
@@ -92,11 +196,8 @@ function applySnapshot(data) {
     circuitEl.className = 'badge circuit ' + (data.circuit_state || 'closed');
   }
 
-  setText('badge-mode',     data.mode || 'paper');
-  setText('badge-strategy', data.strategy || '—');
-  setText('last-update',    'Updated ' + new Date(data.timestamp).toLocaleTimeString());
-
-  pushEquityPoint(data.total_value_usd, data.timestamp);
+  setText('badge-mode',  data.mode || 'paper');
+  setText('last-update', 'Updated ' + new Date(data.timestamp).toLocaleTimeString());
 }
 
 function prependTrade(fill) {
@@ -105,8 +206,11 @@ function prependTrade(fill) {
   const tr = document.createElement('tr');
   const time = new Date(fill.timestamp || fill.received_at).toLocaleTimeString();
   const sideClass = fill.side === 'BUY' ? 'side-buy' : 'side-sell';
+  const strat = fill.strategy || '—';
+  const stratColor = strategyColor(strat);
   tr.innerHTML = `
     <td>${time}</td>
+    <td><span class="badge-strategy-mini" style="border-color:${stratColor};color:${stratColor}">${strat}</span></td>
     <td>${(fill.token_id || '').slice(0, 10)}…</td>
     <td class="${sideClass}">${fill.side}</td>
     <td>$${fmt(fill.filled_size_usd)}</td>
@@ -128,7 +232,7 @@ function addAlert(message) {
   list.prepend(li);
 }
 
-// ── Metrics polling (every 60s) ───────────────────────────────────────────────
+// ── Metrics / strategies polling ──────────────────────────────────────────────
 
 async function refreshMetrics() {
   try {
@@ -137,7 +241,23 @@ async function refreshMetrics() {
     const data = await res.json();
     setText('total-trades', data.total_trades ?? '—');
     setText('win-rate', data.win_rate != null ? (data.win_rate * 100).toFixed(1) + '%' : '—');
-  } catch (_) { /* silently ignore network errors */ }
+  } catch (_) { /* silently ignore */ }
+}
+
+async function refreshStrategies() {
+  try {
+    const res = await fetch('/api/strategies');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.strategies) {
+      renderStrategyCards(data.strategies);
+      data.strategies.forEach(s => {
+        if (s.last_snapshot_at) {
+          updateEquityChart(s.strategy, s.total_value_usd, s.last_snapshot_at);
+        }
+      });
+    }
+  } catch (_) { /* silently ignore */ }
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -147,9 +267,10 @@ function connect() {
 
   ws.onopen = () => {
     console.log('[ws] connected');
-    // Start metrics polling
     refreshMetrics();
-    setInterval(refreshMetrics, 60_000);
+    refreshStrategies();
+    setInterval(refreshMetrics,    60_000);
+    setInterval(refreshStrategies, 60_000);
   };
 
   ws.onmessage = (event) => {
@@ -159,6 +280,16 @@ function connect() {
     switch (msg.type) {
       case 'snapshot':
         applySnapshot(msg);
+        break;
+      case 'strategies':
+        if (msg.strategies) {
+          renderStrategyCards(msg.strategies);
+          msg.strategies.forEach(s => {
+            if (s.last_snapshot_at) {
+              updateEquityChart(s.strategy, s.total_value_usd, s.last_snapshot_at);
+            }
+          });
+        }
         break;
       case 'fill':
         if (msg.fill)      prependTrade(msg.fill);
@@ -171,7 +302,7 @@ function connect() {
         applySnapshot({ ...(window._lastSnapshot || {}), circuit_state: msg.state });
         break;
       case 'pong':
-        break; // keepalive ack
+        break;
     }
 
     if (msg.type === 'snapshot' || msg.type === 'fill') {

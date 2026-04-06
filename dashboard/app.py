@@ -149,6 +149,71 @@ async def _compute_metrics() -> dict:
     }
 
 
+async def _all_strategy_metrics() -> list[dict]:
+    """Return per-strategy summary: latest snapshot + trade metrics."""
+    pool = await _get_pool()
+
+    # Per-strategy trade metrics
+    trade_rows = await pool.fetch(
+        """
+        SELECT
+            strategy,
+            COUNT(*)                                                     AS total_trades,
+            COUNT(*) FILTER (WHERE side = 'SELL' AND size_usd > 0)      AS wins,
+            COUNT(*) FILTER (WHERE side = 'SELL')                        AS total_sells,
+            COALESCE(
+                SUM(CASE WHEN side = 'SELL' THEN size_usd - fee_usd ELSE 0 END), 0
+            )                                                            AS realized_pnl_trades
+        FROM trades
+        GROUP BY strategy
+        """
+    )
+    trade_by_strategy: dict[str, dict] = {}
+    for r in trade_rows:
+        d = _row(r)
+        total_sells = int(d.get("total_sells", 0))
+        wins = int(d.get("wins", 0))
+        trade_by_strategy[d["strategy"]] = {
+            "total_trades": int(d.get("total_trades", 0)),
+            "win_rate": round(wins / total_sells, 4) if total_sells > 0 else 0.0,
+            "realized_pnl_trades": float(d.get("realized_pnl_trades", 0.0)),
+        }
+
+    # Latest snapshot per strategy (uses strategy column if present)
+    snap_rows = await pool.fetch(
+        """
+        SELECT DISTINCT ON (strategy)
+            strategy, total_value_usd, cash_usd, positions_value_usd,
+            realized_pnl, open_positions, snapshot_at
+        FROM portfolio_snapshots
+        ORDER BY strategy, snapshot_at DESC
+        """
+    )
+    snap_by_strategy: dict[str, dict] = {}
+    for r in snap_rows:
+        d = _row(r)
+        snap_by_strategy[d["strategy"]] = d
+
+    # Merge: union of all known strategies
+    all_strategies = set(trade_by_strategy) | set(snap_by_strategy)
+    result: list[dict] = []
+    for strat in sorted(all_strategies):
+        snap = snap_by_strategy.get(strat, {})
+        trades = trade_by_strategy.get(strat, {})
+        result.append({
+            "strategy":        strat,
+            "total_value_usd": round(float(snap.get("total_value_usd", _INITIAL_CAPITAL)), 2),
+            "cash_usd":        round(float(snap.get("cash_usd", _INITIAL_CAPITAL)), 2),
+            "positions_value_usd": round(float(snap.get("positions_value_usd", 0.0)), 2),
+            "realized_pnl":    round(float(snap.get("realized_pnl", trades.get("realized_pnl_trades", 0.0))), 2),
+            "open_positions":  int(snap.get("open_positions", 0)),
+            "total_trades":    trades.get("total_trades", 0),
+            "win_rate":        trades.get("win_rate", 0.0),
+            "last_snapshot_at": snap.get("snapshot_at"),
+        })
+    return result
+
+
 # ── WebSocket manager ─────────────────────────────────────────────────────────
 
 class _ConnectionManager:
@@ -202,6 +267,11 @@ async def metrics() -> dict:
     return await _compute_metrics()
 
 
+@app.get("/api/strategies")
+async def strategies() -> dict:
+    return {"strategies": await _all_strategy_metrics()}
+
+
 @app.get("/api/alerts")
 async def alerts() -> dict:
     return {"alerts": []}
@@ -218,6 +288,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await ws.send_text(json.dumps({"type": "snapshot", **snap}))
         last_id = snap.get("id")
 
+        strats = await _all_strategy_metrics()
+        await ws.send_text(json.dumps({"type": "strategies", "strategies": strats}))
+
+        strat_tick = 0  # send strategies every 6 polls (~30s)
         while True:
             try:
                 # Wait for client message (ping) with 5s timeout
@@ -230,6 +304,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if snap.get("id") != last_id:
                     last_id = snap.get("id")
                     await ws.send_text(json.dumps({"type": "snapshot", **snap}))
+                # Push per-strategy metrics every ~30s
+                strat_tick += 1
+                if strat_tick >= 6:
+                    strat_tick = 0
+                    strats = await _all_strategy_metrics()
+                    await ws.send_text(json.dumps({"type": "strategies", "strategies": strats}))
     except WebSocketDisconnect:
         pass
     finally:
