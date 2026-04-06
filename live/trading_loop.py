@@ -368,12 +368,14 @@ async def run_paper_loop(settings: Settings) -> None:
             strategy = CalibrationBetting(market_data=market_data)
             logger.info("Paper strategy: calibration_betting")
         elif paper_strat == "value_betting":
-            # Re-fetch: lower volume floor, filter to 1h–max_resolution_hours window.
-            # Top-volume markets resolve months/years out — they'd all be filtered by the
-            # strategy's hours_left check before the LLM is ever called.
+            # fetch_markets() caps at MAX_MARKETS=50 sorted by volume — those top-50 markets
+            # resolve months/years out and are all filtered by hours_left before the LLM runs.
+            # Fix: call get_active_markets() directly with a larger cap, then filter by time window.
             from datetime import datetime as _dt_vb, timezone as _tz_vb
             _now_vb = _dt_vb.now(_tz_vb.utc)
-            _all_vb = fetch_markets(settings, min_volume=10_000.0)
+            _fetcher_vb = GammaFetcher()
+            _all_vb = _fetcher_vb.get_active_markets(min_volume=10_000.0, max_markets=2_000)
+            _all_vb = [_m for _m in _all_vb if _m.yes_token_id and _m.no_token_id]
             _vb_window: list[Market] = []
             for _m in _all_vb:
                 if _m.end_date is None:
@@ -410,14 +412,19 @@ async def run_paper_loop(settings: Settings) -> None:
                 res=settings.llm_max_resolution_hours,
             )
         elif paper_strat == "weather_betting":
-            # Re-fetch without volume floor: weather markets have low volume (~$100–$10k)
-            # and would never appear in the top-50-by-volume list.
+            # Weather markets have low volume (~$100–$10k) — never in the top-2000 by default
+            # API order. Use get_short_window_markets(48h) which filters by end_date_max
+            # server-side, reliably returning today's/tomorrow's temperature markets.
             from strategies.weather_betting import is_weather_market as _is_wx
-            _all_wx = fetch_markets(settings, min_volume=0.0)
-            markets = [_m for _m in _all_wx if _is_wx(_m.question or "")][:MAX_MARKETS]
+            _fetcher_wx = GammaFetcher()
+            _short = _fetcher_wx.get_short_window_markets(max_hours=48.0, max_markets=500)
+            markets = [
+                _m for _m in _short
+                if _is_wx(_m.question or "") and _m.yes_token_id and _m.no_token_id
+            ][:MAX_MARKETS]
             market_data = {m.condition_id: m for m in markets}
             logger.info(
-                "weather_betting market filter: {n} weather markets found",
+                "weather_betting market filter: {n} weather markets resolving in ≤48h",
                 n=len(markets),
             )
 
