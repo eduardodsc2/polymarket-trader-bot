@@ -16,6 +16,25 @@ services:
     networks:
       - polymarket
 
+  bot-weather:
+    build:
+      context: .
+      target: bot
+    env_file: .env
+    environment:
+      PAPER_STRATEGY: weather_betting
+      INITIAL_CAPITAL_USD: "500"
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - polymarket
+
   db:
     image: postgres:16-alpine
     restart: unless-stopped

@@ -7,7 +7,7 @@ is validated through these models.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -220,6 +220,34 @@ class BacktestMetrics(BaseModel):
     total_trades: int
     brier_score: Optional[float] = None
     expected_value_per_trade: Optional[float] = None
+
+
+# ── On-chain reconciliation ───────────────────────────────────────────────────
+
+# ── Weather betting ───────────────────────────────────────────────────────────
+
+class WeatherBucket(BaseModel):
+    """One temperature bucket in a Polymarket weather market."""
+    label: str           # e.g. "27°C", "28°C or higher"
+    lo: float            # lower bound °C, inclusive
+    hi: float            # upper bound °C, exclusive (math.inf for last bucket)
+    model_prob: float    # P(lo <= daily_max < hi) via Monte Carlo
+    market_price: float  # current Polymarket price (0.0–1.0)
+    edge: float          # model_prob - market_price
+    token_id: str        # CLOB token_id for this bucket
+
+
+class WeatherForecast(BaseModel):
+    """Meteorological forecast for a city on a specific date."""
+    city: str
+    lat: float
+    lon: float
+    forecast_date: date
+    point_forecast_celsius: float   # predicted daily maximum temperature
+    sigma_celsius: float            # forecast uncertainty in °C
+    source: str                     # "open_meteo"
+    fetched_at: datetime
+    buckets: list[WeatherBucket] = Field(default_factory=list)
 
 
 # ── On-chain reconciliation ───────────────────────────────────────────────────

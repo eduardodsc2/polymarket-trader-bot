@@ -380,6 +380,15 @@ async def run_paper_loop(settings: Settings) -> None:
                 skip=settings.llm_news_skip_below_hours,
                 res=settings.llm_max_resolution_hours,
             )
+        elif paper_strat == "weather_betting":
+            from strategies.weather_betting import WeatherBettingStrategy
+            import requests
+            strategy = WeatherBettingStrategy(
+                market_data=market_data,
+                http_client=requests.Session(),
+                settings=settings,
+            )
+            logger.info("Paper strategy: weather_betting (fee-free, Open-Meteo)")
         else:
             strategy = MarketMaker(market_data=market_data, order_size_usdc=20.0)
             logger.info("Paper strategy: market_maker")

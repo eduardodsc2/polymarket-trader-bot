@@ -28,3 +28,31 @@ momentum:
   entry_threshold: 0.03      # Min price change over lookback to enter
   max_position_usd: 75.0
   kelly_fraction: 0.20
+
+weather_betting:
+  enabled: false
+  cities:
+    - name: "New York"
+      lat: 40.7812
+      lon: -73.9665
+      polymarket_station: "NYC"
+    - name: "Chicago"
+      lat: 41.8827
+      lon: -87.6233
+      polymarket_station: "Chicago"
+    - name: "Miami"
+      lat: 25.7617
+      lon: -80.1918
+      polymarket_station: "Miami"
+  forecast_source: "open_meteo"     # free, no API key required
+  forecast_horizon_days: 1          # D+1 only (resolves in 24h)
+  sigma_celsius: 1.5                # forecast uncertainty in °C (v1: fixed)
+  monte_carlo_samples: 50000        # samples for P(bucket) calculation
+  min_volume_usd: 10000             # standard risk_manager rule
+  max_hours_to_close: 26            # only markets resolving within 26h
+  min_edge_pct: 5.0                 # min edge % to enter (model_prob - market_price)
+  max_buckets_per_market: 4         # max legs per market ladder
+  min_bucket_price: 0.01            # skip buckets below 1¢ (no liquidity)
+  max_bucket_price: 0.60            # skip buckets above 60¢ (edge compressed)
+  kelly_fraction: 0.25              # fractional Kelly (standard project default)
+  max_position_size_usd: 25.0       # conservative cap per leg (v1)
