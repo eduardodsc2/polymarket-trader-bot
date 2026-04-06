@@ -132,7 +132,7 @@ class ValueBetting(BaseStrategy):
                 else market.end_date.replace(tzinfo=timezone.utc)
             )
             hours_left = (end_dt - event.timestamp).total_seconds() / 3600
-            if hours_left < 0 or hours_left > self._max_resolution_hours:
+            if hours_left < 1.0 or hours_left > self._max_resolution_hours:
                 return []
 
         # Get (or fetch) LLM estimate

@@ -38,11 +38,11 @@ class Settings(BaseSettings):
     news_min_relevance_score: float = 0.35
     news_max_articles_per_prompt: int = 3   # was 5 — fewer articles = fewer input tokens
     use_semantic_relevance: bool = False
-    llm_news_skip_below_hours: float = 0.5  # skip news fetch for markets resolving in < 30min (no relevant articles exist)
-    llm_max_resolution_hours: float = 0.25  # only evaluate markets resolving within this window (0.25 = 15min)
+    llm_news_skip_below_hours: float = 1.0  # skip news fetch for markets resolving in < 1h (edge colapsa, LLM não agrega)
+    llm_max_resolution_hours: float = 24.0  # only evaluate markets resolving within this window (24h = daytrading)
 
     # ── LLM pipeline (Phase 4) ───────────────────────────────────────────────
-    llm_cache_ttl_hours: int = 12          # was 6 — stable markets don't change in 12h
+    llm_cache_ttl_hours: int = 4           # 4h — mercados de 24h mudam mais que os de 15min
     llm_min_volume_usd: float = 50_000.0
 
     # ── Database ─────────────────────────────────────────────────────────────

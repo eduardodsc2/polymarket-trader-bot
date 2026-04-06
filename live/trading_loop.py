@@ -276,35 +276,14 @@ def _portfolio_to_snapshot(state: PortfolioState, positions_value: float = 0.0) 
 def fetch_markets(
     settings: Settings,
     min_volume: float = 50_000.0,
-    max_resolution_hours: float | None = None,
 ) -> list[Market]:
     """
     Fetch active markets from Gamma API and filter for tradeable ones.
 
-    Args:
-        min_volume:           Minimum market volume in USD.
-        max_resolution_hours: When set, only subscribe to markets whose end_date
-                              falls within (now, now + max_resolution_hours * 8).
-                              The 8x buffer ensures the pool contains markets that
-                              will enter the strategy's tight window during runtime.
-                              (e.g. max_resolution_hours=0.25 → pool covers next 2h)
-
     Returns up to MAX_MARKETS markets sorted by volume descending.
     """
     fetcher = GammaFetcher()
-
-    if max_resolution_hours is not None:
-        # Short-window mode: fetch markets by end_date instead of volume.
-        # 15min markets have low per-market volume and won't appear in top-N by volume.
-        pool_horizon_hours = max_resolution_hours * 8
-        markets = fetcher.get_short_window_markets(max_hours=pool_horizon_hours)
-        logger.info(
-            "Short-window fetch | pool={p}h | {n} markets returned",
-            p=pool_horizon_hours,
-            n=len(markets),
-        )
-    else:
-        markets = fetcher.get_active_markets(min_volume=min_volume)
+    markets = fetcher.get_active_markets(min_volume=min_volume)
 
     # Only keep markets with both token IDs (needed for strategy and DataStream)
     tradeable = [
@@ -343,12 +322,7 @@ async def run_paper_loop(settings: Settings) -> None:
     )
 
     logger.info("Fetching active markets from Gamma API...")
-    paper_strat_for_fetch = settings.paper_strategy.lower() if settings.bot_mode != "live" else ""
-    markets = fetch_markets(
-        settings,
-        min_volume=settings.min_market_volume_usd,
-        max_resolution_hours=settings.llm_max_resolution_hours if paper_strat_for_fetch == "value_betting" else None,
-    )
+    markets = fetch_markets(settings, min_volume=settings.min_market_volume_usd)
 
     if not markets:
         logger.error("No tradeable markets found. Check Gamma API connectivity.")
