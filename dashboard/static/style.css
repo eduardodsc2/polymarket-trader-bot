@@ -162,6 +162,9 @@ main { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.5rem; }
 .sm-value { font-size: 0.95em; font-weight: 700; color: var(--text); }
 .sm-value.positive { color: var(--green); }
 .sm-value.negative { color: var(--red); }
+.sm-span2 { grid-column: span 2; }
+.sm-span2.stale .sm-label::after { content: " ⚠"; color: var(--yellow); }
+.sm-span2.stale .sm-value { color: var(--yellow); }
 
 /* Mini strategy badge used in trades table */
 .badge-strategy-mini {

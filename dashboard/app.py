@@ -179,12 +179,12 @@ async def _all_strategy_metrics() -> list[dict]:
             "realized_pnl_trades": float(d.get("realized_pnl_trades", 0.0)),
         }
 
-    # Latest snapshot per strategy (uses strategy column if present)
+    # Latest snapshot per strategy
     snap_rows = await pool.fetch(
         """
         SELECT DISTINCT ON (strategy)
             strategy, total_value_usd, cash_usd, positions_value_usd,
-            realized_pnl, open_positions, snapshot_at
+            realized_pnl, open_positions, snapshot_at, ticks
         FROM portfolio_snapshots
         ORDER BY strategy, snapshot_at DESC
         """
@@ -194,22 +194,54 @@ async def _all_strategy_metrics() -> list[dict]:
         d = _row(r)
         snap_by_strategy[d["strategy"]] = d
 
+    # Previous snapshot per strategy (to compute ticks/min delta)
+    prev_rows = await pool.fetch(
+        """
+        SELECT strategy, ticks, snapshot_at FROM (
+            SELECT strategy, ticks, snapshot_at,
+                   ROW_NUMBER() OVER (PARTITION BY strategy ORDER BY snapshot_at DESC) AS rn
+            FROM portfolio_snapshots
+        ) t WHERE rn = 2
+        """
+    )
+    prev_by_strategy: dict[str, dict] = {}
+    for r in prev_rows:
+        d = _row(r)
+        prev_by_strategy[d["strategy"]] = d
+
     # Merge: union of all known strategies
     all_strategies = set(trade_by_strategy) | set(snap_by_strategy)
     result: list[dict] = []
     for strat in sorted(all_strategies):
         snap = snap_by_strategy.get(strat, {})
+        prev = prev_by_strategy.get(strat, {})
         trades = trade_by_strategy.get(strat, {})
+
+        ticks_now = int(snap.get("ticks", 0))
+        ticks_per_min: int | None = None
+        snap_at = snap.get("snapshot_at")
+        prev_at = prev.get("snapshot_at")
+        if snap_at and prev_at and ticks_now > 0:
+            from datetime import datetime as _dt
+            t1 = _dt.fromisoformat(prev_at) if isinstance(prev_at, str) else prev_at
+            t2 = _dt.fromisoformat(snap_at)  if isinstance(snap_at, str)  else snap_at
+            dt_minutes = (t2 - t1).total_seconds() / 60.0
+            ticks_prev = int(prev.get("ticks", 0))
+            if dt_minutes > 0 and ticks_now >= ticks_prev:
+                ticks_per_min = round((ticks_now - ticks_prev) / dt_minutes)
+
         result.append({
-            "strategy":        strat,
-            "total_value_usd": round(float(snap.get("total_value_usd", _INITIAL_CAPITAL)), 2),
-            "cash_usd":        round(float(snap.get("cash_usd", _INITIAL_CAPITAL)), 2),
+            "strategy":           strat,
+            "total_value_usd":    round(float(snap.get("total_value_usd", _INITIAL_CAPITAL)), 2),
+            "cash_usd":           round(float(snap.get("cash_usd", _INITIAL_CAPITAL)), 2),
             "positions_value_usd": round(float(snap.get("positions_value_usd", 0.0)), 2),
-            "realized_pnl":    round(float(snap.get("realized_pnl", trades.get("realized_pnl_trades", 0.0))), 2),
-            "open_positions":  int(snap.get("open_positions", 0)),
-            "total_trades":    trades.get("total_trades", 0),
-            "win_rate":        trades.get("win_rate", 0.0),
-            "last_snapshot_at": snap.get("snapshot_at"),
+            "realized_pnl":       round(float(snap.get("realized_pnl", trades.get("realized_pnl_trades", 0.0))), 2),
+            "open_positions":     int(snap.get("open_positions", 0)),
+            "total_trades":       trades.get("total_trades", 0),
+            "win_rate":           trades.get("win_rate", 0.0),
+            "ticks":              ticks_now,
+            "ticks_per_min":      ticks_per_min,
+            "last_update":        snap_at,
         })
     return result
 

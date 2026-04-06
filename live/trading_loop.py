@@ -234,6 +234,7 @@ class TradingLoop:
                             session, snapshot,
                             mode=self._mode,
                             strategy=self._strategy.name,
+                            ticks=self._tick_count,
                         )
                         await session.commit()
                 except Exception as exc:

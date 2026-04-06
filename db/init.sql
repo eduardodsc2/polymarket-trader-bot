@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
     id                  BIGSERIAL PRIMARY KEY,
     mode                TEXT NOT NULL CHECK (mode IN ('paper', 'live')),
     strategy            TEXT NOT NULL DEFAULT 'unknown',
+    ticks               BIGINT NOT NULL DEFAULT 0,
     cash_usd            NUMERIC NOT NULL,
     positions_value_usd NUMERIC NOT NULL,
     total_value_usd     NUMERIC NOT NULL,

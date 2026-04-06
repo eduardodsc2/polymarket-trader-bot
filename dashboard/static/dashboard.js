@@ -121,9 +121,6 @@ function renderStrategyCards(strategies) {
     const pnlSign = pnl >= 0 ? '+$' : '-$';
     const pnlClass = pnl >= 0 ? 'positive' : 'negative';
     const winRateTxt = s.win_rate != null ? (s.win_rate * 100).toFixed(1) + '%' : '—';
-    const lastSnap = s.last_snapshot_at
-      ? new Date(s.last_snapshot_at).toLocaleTimeString()
-      : '—';
 
     if (!card) {
       card = document.createElement('div');
@@ -132,10 +129,20 @@ function renderStrategyCards(strategies) {
       grid.appendChild(card);
     }
 
+    const ticks        = s.ticks != null ? Number(s.ticks).toLocaleString('en-US') : '—';
+    const ticksPerMin  = s.ticks_per_min != null ? `~${s.ticks_per_min}/min` : '—';
+    const lastUpdate   = s.last_update ? new Date(s.last_update).toLocaleTimeString() : '—';
+
+    // Staleness indicator: flag if last_update is > 3 min ago
+    let staleClass = '';
+    if (s.last_update) {
+      const ageMin = (Date.now() - new Date(s.last_update).getTime()) / 60000;
+      if (ageMin > 3) staleClass = 'stale';
+    }
+
     card.innerHTML = `
       <div class="strategy-card-header">
         <span class="strategy-name" style="color:${color}">${s.strategy}</span>
-        <span class="strategy-last-update">${lastSnap}</span>
       </div>
       <div class="strategy-metrics">
         <div class="strategy-metric">
@@ -159,8 +166,16 @@ function renderStrategyCards(strategies) {
           <div class="sm-value">${s.total_trades ?? '—'}</div>
         </div>
         <div class="strategy-metric">
-          <div class="sm-label">Positions</div>
-          <div class="sm-value">${s.open_positions ?? '—'}</div>
+          <div class="sm-label">Ticks</div>
+          <div class="sm-value">${ticks}</div>
+        </div>
+        <div class="strategy-metric">
+          <div class="sm-label">Tick Rate</div>
+          <div class="sm-value">${ticksPerMin}</div>
+        </div>
+        <div class="strategy-metric sm-span2 ${staleClass}">
+          <div class="sm-label">Last Update</div>
+          <div class="sm-value">${lastUpdate}</div>
         </div>
       </div>
       <div class="strategy-card-accent" style="background:${color}"></div>
