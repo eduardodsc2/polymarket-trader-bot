@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     news_max_articles_per_prompt: int = 3   # was 5 — fewer articles = fewer input tokens
     use_semantic_relevance: bool = False
     llm_news_skip_below_hours: float = 1.0  # skip news fetch for markets resolving in < 1h (edge colapsa, LLM não agrega)
-    llm_max_resolution_hours: float = 24.0  # only evaluate markets resolving within this window (24h = daytrading)
+    llm_max_resolution_hours: float = 168.0  # evaluate markets resolving within 1h–168h (7 days)
 
     # ── LLM pipeline (Phase 4) ───────────────────────────────────────────────
     llm_cache_ttl_hours: int = 4           # 4h — mercados de 24h mudam mais que os de 15min

@@ -49,7 +49,7 @@ weather_betting:
   sigma_celsius: 1.5                # forecast uncertainty in °C (v1: fixed)
   monte_carlo_samples: 50000        # samples for P(bucket) calculation
   min_volume_usd: 10000             # standard risk_manager rule
-  max_hours_to_close: 26            # only markets resolving within 26h
+  max_hours_to_close: 48            # only markets resolving within 48h
   min_edge_pct: 5.0                 # min edge % to enter (model_prob - market_price)
   max_buckets_per_market: 4         # max legs per market ladder
   min_bucket_price: 0.01            # skip buckets below 1¢ (no liquidity)

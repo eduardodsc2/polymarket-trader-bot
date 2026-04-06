@@ -368,6 +368,30 @@ async def run_paper_loop(settings: Settings) -> None:
             strategy = CalibrationBetting(market_data=market_data)
             logger.info("Paper strategy: calibration_betting")
         elif paper_strat == "value_betting":
+            # Re-fetch: lower volume floor, filter to 1h–max_resolution_hours window.
+            # Top-volume markets resolve months/years out — they'd all be filtered by the
+            # strategy's hours_left check before the LLM is ever called.
+            from datetime import datetime as _dt_vb, timezone as _tz_vb
+            _now_vb = _dt_vb.now(_tz_vb.utc)
+            _all_vb = fetch_markets(settings, min_volume=10_000.0)
+            _vb_window: list[Market] = []
+            for _m in _all_vb:
+                if _m.end_date is None:
+                    continue
+                _end = _m.end_date if _m.end_date.tzinfo else _m.end_date.replace(tzinfo=_tz_vb.utc)
+                _h = (_end - _now_vb).total_seconds() / 3600
+                if settings.llm_news_skip_below_hours <= _h <= settings.llm_max_resolution_hours:
+                    _vb_window.append(_m)
+            _vb_window.sort(key=lambda _m: _m.volume_usd or 0, reverse=True)
+            markets = _vb_window[:MAX_MARKETS]
+            market_data = {m.condition_id: m for m in markets}
+            logger.info(
+                "value_betting market filter: {n} markets in {lo}h–{hi}h window",
+                n=len(markets),
+                lo=settings.llm_news_skip_below_hours,
+                hi=settings.llm_max_resolution_hours,
+            )
+
             from strategies.value_betting import ValueBetting
             from llm.estimator import LLMEstimator
             llm_estimator = LLMEstimator(api_key=settings.anthropic_api_key, model=settings.llm_model)
@@ -386,6 +410,17 @@ async def run_paper_loop(settings: Settings) -> None:
                 res=settings.llm_max_resolution_hours,
             )
         elif paper_strat == "weather_betting":
+            # Re-fetch without volume floor: weather markets have low volume (~$100–$10k)
+            # and would never appear in the top-50-by-volume list.
+            from strategies.weather_betting import is_weather_market as _is_wx
+            _all_wx = fetch_markets(settings, min_volume=0.0)
+            markets = [_m for _m in _all_wx if _is_wx(_m.question or "")][:MAX_MARKETS]
+            market_data = {m.condition_id: m for m in markets}
+            logger.info(
+                "weather_betting market filter: {n} weather markets found",
+                n=len(markets),
+            )
+
             from strategies.weather_betting import WeatherBettingStrategy
             import requests
             strategy = WeatherBettingStrategy(
