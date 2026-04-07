@@ -173,6 +173,7 @@ class CalibrationBetting(BaseStrategy):
                 size_usd=size,
                 limit_price=None,   # market order
                 timestamp=event.timestamp,
+                edge=abs(edge),
             )
         ]
 
