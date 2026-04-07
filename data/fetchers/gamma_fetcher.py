@@ -264,7 +264,7 @@ class GammaFetcher:
         return Market(
             condition_id=raw.get("conditionId") or raw.get("condition_id", ""),
             question=raw.get("question", ""),
-            category=raw.get("category"),
+            category=raw.get("category") or _infer_category(raw),
             end_date=end_date,
             resolved=bool(raw.get("closed", False)),
             outcome=raw.get("outcome"),
@@ -274,6 +274,24 @@ class GammaFetcher:
             yes_token_id=yes_token_id,
             no_token_id=no_token_id,
         )
+
+
+def _infer_category(raw: dict[str, Any]) -> str | None:
+    """Infer market category from Gamma API fields when 'category' is absent."""
+    if raw.get("sportsMarketType"):
+        return "sports"
+    question = (raw.get("question") or "").lower()
+    if any(w in question for w in ["bitcoin", "btc", "ethereum", "eth", "crypto", "solana", "sol", "price of", "above $", "below $"]):
+        return "crypto"
+    if any(w in question for w in ["election", "president", "congress", "senate", "vote", "democrat", "republican", "trump", "biden", "harris", "governor", "mayor", "parliament", "minister"]):
+        return "politics"
+    if any(w in question for w in ["fed ", "interest rate", "gdp", "recession", "cpi", "inflation", "unemployment", "dow jones", "s&p", "nasdaq"]):
+        return "finance"
+    if any(w in question for w in ["ceasefire", "war", "attack", "arrest", "indicted", "convicted", "resign", "assassin", "hurricane", "earthquake", "disaster"]):
+        return "news"
+    if any(w in question for w in ["ai ", "gpt", "claude", "gemini", "openai", "anthropic", "llm", "model release", "artificial intelligence"]):
+        return "science"
+    return None
 
 
 def _to_float(value: Any) -> float | None:

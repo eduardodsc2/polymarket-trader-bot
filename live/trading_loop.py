@@ -440,24 +440,32 @@ async def run_paper_loop(settings: Settings) -> None:
             # Weather markets have low volume (~$100–$10k) — never in the top-2000 by default
             # API order. Use get_short_window_markets(48h) which filters by end_date_max
             # server-side, reliably returning today's/tomorrow's temperature markets.
-            from strategies.weather_betting import is_weather_market as _is_wx
-            _fetcher_wx = GammaFetcher()
-            _short = _fetcher_wx.get_short_window_markets(max_hours=48.0, max_markets=500)
-            markets = [
-                _m for _m in _short
-                if _is_wx(_m.question or "") and _m.yes_token_id and _m.no_token_id
-            ][:MAX_MARKETS]
-            market_data = {m.condition_id: m for m in markets}
-            logger.info(
-                "weather_betting market filter: {n} weather markets resolving in ≤48h",
-                n=len(markets),
-            )
+            import asyncio as _asyncio
+            from strategies.weather_betting import is_weather_market as _is_wx, WeatherBettingStrategy
+            import requests as _requests
+            _wx_retry_secs = 1800  # retry every 30 min when no weather markets available
+            while True:
+                _fetcher_wx = GammaFetcher()
+                _short = _fetcher_wx.get_short_window_markets(max_hours=48.0, max_markets=500)
+                markets = [
+                    _m for _m in _short
+                    if _is_wx(_m.question or "") and _m.yes_token_id and _m.no_token_id
+                ][:MAX_MARKETS]
+                market_data = {m.condition_id: m for m in markets}
+                logger.info(
+                    "weather_betting market filter: {n} weather markets resolving in ≤48h",
+                    n=len(markets),
+                )
+                if markets:
+                    break
+                logger.warning(
+                    "No weather markets found — sleeping {}s before retry", _wx_retry_secs
+                )
+                await _asyncio.sleep(_wx_retry_secs)
 
-            from strategies.weather_betting import WeatherBettingStrategy
-            import requests
             strategy = WeatherBettingStrategy(
                 market_data=market_data,
-                http_client=requests.Session(),
+                http_client=_requests.Session(),
                 settings=settings,
             )
             logger.info("Paper strategy: weather_betting (fee-free, Open-Meteo)")
