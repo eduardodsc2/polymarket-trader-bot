@@ -382,10 +382,12 @@ async def run_paper_loop(settings: Settings) -> None:
             _cb_window.sort(key=lambda _m: _m.volume_usd or 0, reverse=True)
             _cb_markets = _cb_window[:MAX_MARKETS]
             _cb_market_data = {m.condition_id: m for m in _cb_markets}
+            _cb_max_pos = settings.initial_capital_usd * 0.05  # align with RiskManager 5% cap
             strategy = CalibrationBetting(
                 market_data=_cb_market_data,
                 min_hours_to_resolution=24.0,
                 max_days_to_resolution=30,
+                max_position_usdc=_cb_max_pos,
             )
             # Override both market_data (dict) AND markets (list) so TradingLoop
             # subscribes to the same tokens that CalibrationBetting is watching.
