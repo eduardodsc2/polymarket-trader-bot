@@ -153,11 +153,11 @@ class CalibrationBetting(BaseStrategy):
                 return []
             price = 1.0 - yes_price  # approximate NO price
 
-        if price <= 0.0:
-            return []
+        if not (0.01 <= price <= 0.99):
+            return []  # skip resolved/near-resolved markets (price at boundary)
 
         # Fractional Kelly sizing
-        size = self._kelly_size(base_rate, price, portfolio, edge)
+        size = self._kelly_size(base_rate, price, portfolio)
         if size < 1.0:
             return []
 
@@ -187,7 +187,6 @@ class CalibrationBetting(BaseStrategy):
         p: float,
         market_price: float,
         portfolio: PortfolioSnapshot,
-        edge: float,
     ) -> float:
         """
         Fractional Kelly position size in USD.
