@@ -387,7 +387,10 @@ async def run_paper_loop(settings: Settings) -> None:
                 min_hours_to_resolution=24.0,
                 max_days_to_resolution=30,
             )
+            # Override both market_data (dict) AND markets (list) so TradingLoop
+            # subscribes to the same tokens that CalibrationBetting is watching.
             market_data = _cb_market_data
+            markets = _cb_markets
             logger.info(
                 "Paper strategy: calibration_betting | eligible_markets={n} | window=24h–30d",
                 n=len(_cb_markets),
